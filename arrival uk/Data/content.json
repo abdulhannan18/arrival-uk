@@ -1,0 +1,133 @@
+{
+  "categories": [
+    {
+      "id": "before_arrival",
+      "title": "Before Arrival",
+      "icon": "airplane.departure",
+      "tasks": [
+        {
+          "id": "before_visa_check",
+          "title": "Confirm visa documents are complete",
+          "detail": "Double-check passport validity, CAS details, and proof of funds before travel.",
+          "timing": "month_before_arrival",
+          "priority": "must_do",
+          "sourceTitle": "UK Student Visa Guidance (GOV.UK)",
+          "sourceURL": "https://www.gov.uk/student-visa"
+        },
+        {
+          "id": "before_uni_letter",
+          "title": "Download university status letter template",
+          "detail": "Prepare a digital copy so bank account and admin steps are faster after arrival.",
+          "timing": "week_before_arrival",
+          "priority": "should_do"
+        },
+        {
+          "id": "before_housing_docs",
+          "title": "Prepare housing and ID document pack",
+          "detail": "Keep tenancy agreement, passport, visa proof, and offer letter in one folder.",
+          "timing": "week_before_arrival",
+          "priority": "must_do"
+        },
+        {
+          "id": "before_budget",
+          "title": "Set first-month budget",
+          "detail": "Estimate rent, groceries, transport, and emergency spending for your first month.",
+          "timing": "week_before_arrival",
+          "priority": "should_do"
+        }
+      ]
+    },
+    {
+      "id": "health_admin",
+      "title": "Health & Admin",
+      "icon": "heart.text.square",
+      "tasks": [
+        {
+          "id": "health_gp",
+          "title": "Register with a GP surgery",
+          "detail": "Do this soon after settling so healthcare access is ready when needed.",
+          "timing": "first_week",
+          "priority": "must_do",
+          "sourceTitle": "How to Register with a GP (NHS)",
+          "sourceURL": "https://www.nhs.uk/nhs-services/gps/how-to-register-with-a-gp-surgery/"
+        },
+        {
+          "id": "health_ni",
+          "title": "Apply for National Insurance number",
+          "detail": "Needed for legal employment and correct tax setup in part-time or full-time work.",
+          "timing": "first_month",
+          "priority": "must_do",
+          "sourceTitle": "Apply for a National Insurance Number (GOV.UK)",
+          "sourceURL": "https://www.gov.uk/apply-national-insurance-number"
+        },
+        {
+          "id": "health_council_tax",
+          "title": "Submit council tax student exemption",
+          "detail": "Use your student proof to avoid paying full council tax where eligible.",
+          "timing": "first_month",
+          "priority": "should_do",
+          "sourceTitle": "Council Tax Discounts for Students (GOV.UK)",
+          "sourceURL": "https://www.gov.uk/council-tax/discounts-for-full-time-students"
+        }
+      ]
+    },
+    {
+      "id": "money_banking",
+      "title": "Money & Banking",
+      "icon": "banknote",
+      "tasks": [
+        {
+          "id": "money_open_account",
+          "title": "Open a UK bank account",
+          "detail": "Compare student accounts and keep your enrollment letter ready for verification.",
+          "timing": "first_week",
+          "priority": "must_do"
+        },
+        {
+          "id": "money_alerts",
+          "title": "Enable spending alerts and limits",
+          "detail": "Turn on transaction notifications to avoid overspending during early setup weeks.",
+          "timing": "first_week",
+          "priority": "should_do"
+        },
+        {
+          "id": "money_emergency_buffer",
+          "title": "Create a small emergency buffer",
+          "detail": "Aim for a minimum reserve so unexpected transport or medical costs are covered.",
+          "timing": "first_month",
+          "priority": "optional"
+        }
+      ]
+    },
+    {
+      "id": "travel_discounts",
+      "title": "Travel & Discounts",
+      "icon": "tram",
+      "tasks": [
+        {
+          "id": "travel_railcard",
+          "title": "Buy a 16-25 Railcard (if eligible)",
+          "detail": "Can reduce train fares significantly during term and holiday travel.",
+          "timing": "first_month",
+          "priority": "should_do",
+          "sourceTitle": "16-25 Railcard",
+          "sourceURL": "https://www.16-25railcard.co.uk/"
+        },
+        {
+          "id": "travel_local_pass",
+          "title": "Check local student transport pass",
+          "detail": "Many cities offer discounted bus or metro options for students.",
+          "timing": "first_month",
+          "priority": "should_do"
+        },
+        {
+          "id": "travel_route_setup",
+          "title": "Save key routes in transport apps",
+          "detail": "Pre-save campus, accommodation, supermarket, and nearest hospital routes.",
+          "timing": "first_week",
+          "priority": "optional"
+        }
+      ]
+    }
+  ]
+}

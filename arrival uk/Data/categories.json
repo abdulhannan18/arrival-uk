@@ -1,0 +1,680 @@
+{
+  "categories": [
+    {
+      "id": "getting_settled",
+      "title": "Before Arrival",
+      "subtitle": "Must complete before landing",
+      "icon": "house.fill",
+      "gradient": [
+        "#667EEA",
+        "#764BA2"
+      ],
+      "priority": "critical",
+      "urgency": "immediate",
+      "accentColor": "#1E3A5F",
+      "deadline": "2026-02-25",
+      "isVisible": true,
+      "order": 1,
+      "cityFilters": [],
+      "universityFilters": [],
+      "unlockRequirements": null,
+      "tasks": [
+        {
+          "id": "open_bank_account",
+          "title": "Open Bank Account",
+          "detail": "Set this up early so salary, rent, and daily spending are easier.",
+          "estimatedMinutes": 45,
+          "urgency": "high",
+          "order": 1,
+          "timing": "first_week",
+          "priority": "must_do",
+          "content": {
+            "type": "rich-guide",
+            "sections": [
+              {
+                "type": "why",
+                "title": "Why This Matters",
+                "content": "You need a UK bank account to get paid, pay rent, and avoid payment friction in your first month."
+              },
+              {
+                "type": "checklist",
+                "title": "What You Need",
+                "items": [
+                  "Passport or BRP",
+                  "Proof of UK address",
+                  "University enrollment letter",
+                  "Phone number and email"
+                ]
+              },
+              {
+                "type": "options",
+                "title": "Best Student Account Options",
+                "items": [
+                  {
+                    "name": "HSBC Student Account",
+                    "description": "Strong student perks and broad branch coverage.",
+                    "rating": 4.5,
+                    "tags": [
+                      "Popular",
+                      "Strong perks"
+                    ],
+                    "priceLevel": "No monthly fee",
+                    "highlights": [
+                      "Online appointment booking",
+                      "Student incentives",
+                      "Good mobile app"
+                    ],
+                    "link": {
+                      "type": "external",
+                      "url": "https://www.hsbc.co.uk/current-accounts/products/student/",
+                      "label": "Apply Online",
+                      "source": {
+                        "sourceType": "official",
+                        "sourceName": "HSBC UK",
+                        "lastVerified": "2026-02-05"
+                      }
+                    },
+                    "location": {
+                      "type": "nearby",
+                      "search": "HSBC near me"
+                    },
+                    "source": {
+                      "sourceType": "official",
+                      "sourceName": "HSBC UK",
+                      "lastVerified": "2026-02-05"
+                    }
+                  },
+                  {
+                    "name": "Lloyds Student Account",
+                    "description": "Simple setup and overdraft options.",
+                    "rating": 4.2,
+                    "tags": [
+                      "No monthly fee"
+                    ],
+                    "highlights": [
+                      "Easy in-app management",
+                      "Large ATM network"
+                    ],
+                    "link": {
+                      "type": "external",
+                      "url": "https://www.lloydsbank.com/current-accounts/all-accounts/student-account.html",
+                      "label": "View Details",
+                      "source": {
+                        "sourceType": "official",
+                        "sourceName": "Lloyds Bank",
+                        "lastVerified": "2026-02-05"
+                      }
+                    },
+                    "location": {
+                      "type": "nearby",
+                      "search": "Lloyds bank near me"
+                    },
+                    "source": {
+                      "sourceType": "official",
+                      "sourceName": "Lloyds Bank",
+                      "lastVerified": "2026-02-05"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "tips",
+                "title": "Tips from Students",
+                "items": [
+                  {
+                    "text": "Book a branch appointment before walking in.",
+                    "author": "Sarah, Manchester"
+                  },
+                  {
+                    "text": "Carry digital and printed copies of your address proof.",
+                    "author": "Ahmed, London"
+                  }
+                ]
+              },
+              {
+                "type": "references",
+                "title": "Official Resources",
+                "items": [
+                  {
+                    "title": "UK Finance Student Banking",
+                    "description": "Overview of student account basics and comparisons.",
+                    "url": "https://www.ukfinance.org.uk/",
+                    "source": {
+                      "sourceType": "official",
+                      "sourceName": "UK Finance",
+                      "lastVerified": "2026-02-05"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "faqs",
+                "title": "Common Questions",
+                "items": [
+                  {
+                    "question": "Can I open an account without permanent housing?",
+                    "answer": "Many banks accept temporary accommodation letters if your university supports it."
+                  },
+                  {
+                    "question": "How long does setup usually take?",
+                    "answer": "Most students complete application and verification in 1 to 7 days."
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "daily_living",
+      "title": "Money & Banking",
+      "subtitle": "Money setup and daily essentials",
+      "icon": "cart.fill",
+      "gradient": [
+        "#F093FB",
+        "#F5576C"
+      ],
+      "priority": "high",
+      "urgency": "week1",
+      "accentColor": "#E07A5F",
+      "isVisible": true,
+      "order": 3,
+      "cityFilters": [],
+      "universityFilters": [],
+      "unlockRequirements": null,
+      "tasks": [
+        {
+          "id": "find_grocery_stores",
+          "title": "Find Grocery Stores",
+          "detail": "Choose where to shop based on price, quality, and access.",
+          "estimatedMinutes": 20,
+          "urgency": "medium",
+          "order": 1,
+          "timing": "first_week",
+          "priority": "should_do",
+          "content": {
+            "type": "comparison-guide",
+            "sections": [
+              {
+                "type": "comparison-table",
+                "title": "Best Grocery Options",
+                "description": "General order from cheapest to premium",
+                "items": [
+                  {
+                    "name": "Aldi",
+                    "priceLevel": "£",
+                    "rating": 4.3,
+                    "highlights": [
+                      "Lowest average basket cost",
+                      "Strong value own-brand range"
+                    ],
+                    "link": {
+                      "type": "external",
+                      "url": "https://www.aldi.co.uk/store-finder",
+                      "label": "Find Nearest Store",
+                      "source": {
+                        "sourceType": "official",
+                        "sourceName": "Aldi UK",
+                        "lastVerified": "2026-02-01"
+                      }
+                    },
+                    "location": {
+                      "type": "nearby",
+                      "search": "Aldi"
+                    },
+                    "source": {
+                      "sourceType": "community",
+                      "sourceName": "Arrival UK student dataset",
+                      "lastVerified": "2026-02-02"
+                    }
+                  },
+                  {
+                    "name": "Tesco",
+                    "priceLevel": "££",
+                    "rating": 4.0,
+                    "highlights": [
+                      "Large network",
+                      "Loyalty discount ecosystem"
+                    ],
+                    "link": {
+                      "type": "external",
+                      "url": "https://www.tesco.com/",
+                      "source": {
+                        "sourceType": "official",
+                        "sourceName": "Tesco",
+                        "lastVerified": "2026-02-01"
+                      }
+                    },
+                    "location": {
+                      "type": "nearby",
+                      "search": "Tesco"
+                    },
+                    "source": {
+                      "sourceType": "community",
+                      "sourceName": "Arrival UK student dataset",
+                      "lastVerified": "2026-02-02"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "tips",
+                "title": "Money-Saving Tips",
+                "items": [
+                  {
+                    "text": "Shop late evening for marked-down fresh food.",
+                    "author": "Community Tip"
+                  },
+                  {
+                    "text": "Build a repeating low-cost basket and compare week to week.",
+                    "author": "Student Team"
+                  }
+                ]
+              },
+              {
+                "type": "apps",
+                "title": "Helpful Apps",
+                "items": [
+                  {
+                    "name": "Too Good To Go",
+                    "description": "Rescue surplus food at lower prices.",
+                    "icon": "bag.fill",
+                    "downloadLinks": {
+                      "ios": "https://apps.apple.com/gb/app/too-good-to-go-end-food-waste/id1060683933",
+                      "android": "https://play.google.com/store/apps/details?id=com.app.tgtg"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "admin_legal",
+      "title": "Health & Admin",
+      "subtitle": "Legal requirement for your first week",
+      "icon": "doc.text.fill",
+      "gradient": [
+        "#FA709A",
+        "#FEE140"
+      ],
+      "priority": "high",
+      "urgency": "week1",
+      "accentColor": "#81B29A",
+      "isVisible": true,
+      "order": 2,
+      "cityFilters": [],
+      "universityFilters": [],
+      "unlockRequirements": null,
+      "tasks": [
+        {
+          "id": "driving_license",
+          "title": "Get UK Driving License",
+          "detail": "Understand the full path before spending on lessons and tests.",
+          "estimatedMinutes": 60,
+          "urgency": "low",
+          "order": 3,
+          "timing": "first_month",
+          "priority": "optional",
+          "content": {
+            "type": "process-guide",
+            "sections": [
+              {
+                "type": "overview",
+                "title": "The Process",
+                "content": "Typical flow: provisional license, then theory test, then practical test."
+              },
+              {
+                "type": "steps",
+                "title": "Step-by-Step Guide",
+                "items": [
+                  {
+                    "number": 1,
+                    "title": "Apply for Provisional License",
+                    "duration": "About 1 week",
+                    "cost": "£34",
+                    "description": "You need this before booking tests.",
+                    "requirements": [
+                      "Valid passport or BRP",
+                      "UK residency requirements"
+                    ],
+                    "actions": [
+                      {
+                        "type": "official-link",
+                        "label": "Apply on GOV.UK",
+                        "url": "https://www.gov.uk/apply-first-provisional-driving-licence"
+                      }
+                    ]
+                  },
+                  {
+                    "number": 2,
+                    "title": "Book Theory Test",
+                    "duration": "2-4 weeks prep",
+                    "cost": "£23",
+                    "description": "Practice consistently before booking.",
+                    "actions": [
+                      {
+                        "type": "official-link",
+                        "label": "Book Theory Test",
+                        "url": "https://www.gov.uk/book-theory-test"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "official-references",
+                "title": "Official Resources",
+                "items": [
+                  {
+                    "title": "GOV.UK Learn to Drive",
+                    "description": "Official government guidance for the full process.",
+                    "url": "https://www.gov.uk/learn-to-drive-a-car",
+                    "source": {
+                      "sourceType": "official",
+                      "sourceName": "GOV.UK",
+                      "lastVerified": "2026-02-06"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "faqs",
+                "title": "Common Questions",
+                "items": [
+                  {
+                    "question": "Can I use my home country license?",
+                    "answer": "It depends on your country and UK exchange rules. Check current GOV.UK guidance."
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "travel_discounts",
+      "title": "Travel & Discounts",
+      "subtitle": "Optional savings and travel deals",
+      "icon": "tram.fill",
+      "priority": "low",
+      "urgency": "anytime",
+      "accentColor": "#F4A261",
+      "isVisible": true,
+      "order": 4,
+      "cityFilters": [],
+      "universityFilters": [],
+      "tasks": [
+        {
+          "id": "get_railcard",
+          "title": "Get 16-25 Railcard",
+          "detail": "Railcard discounts can reduce train fares by around one third across the UK.",
+          "estimatedMinutes": 15,
+          "urgency": "medium",
+          "order": 1,
+          "timing": "first_month",
+          "priority": "should_do",
+          "content": {
+            "type": "rich-guide",
+            "sections": [
+              {
+                "type": "why",
+                "title": "Why This Matters",
+                "content": "Intercity and weekend travel costs add up quickly. A railcard usually pays for itself after a few trips."
+              },
+              {
+                "type": "checklist",
+                "title": "What You Need",
+                "items": [
+                  "A valid passport-style photo",
+                  "A payment card",
+                  "Basic personal details"
+                ]
+              },
+              {
+                "type": "options",
+                "title": "Apply Options",
+                "items": [
+                  {
+                    "name": "16-25 Railcard (Official)",
+                    "description": "Digital or physical card with nationwide discounts.",
+                    "rating": 4.6,
+                    "tags": [
+                      "Popular",
+                      "Student friendly"
+                    ],
+                    "highlights": [
+                      "Valid across most UK train operators",
+                      "Fast digital setup"
+                    ],
+                    "link": {
+                      "type": "external",
+                      "url": "https://www.nationalrail.co.uk/tickets-railcards-and-offers/railcards/16-25-railcard/",
+                      "label": "Check Eligibility",
+                      "source": {
+                        "sourceType": "official",
+                        "sourceName": "National Rail",
+                        "lastVerified": "2026-02-07"
+                      }
+                    },
+                    "source": {
+                      "sourceType": "official",
+                      "sourceName": "National Rail",
+                      "lastVerified": "2026-02-07"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "references",
+                "title": "Official Resources",
+                "items": [
+                  {
+                    "title": "National Rail Railcards",
+                    "description": "Official railcard information and conditions.",
+                    "url": "https://www.nationalrail.co.uk/tickets-railcards-and-offers/railcards/",
+                    "source": {
+                      "sourceType": "official",
+                      "sourceName": "National Rail",
+                      "lastVerified": "2026-02-07"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": "setup_city_transport_discounts",
+          "title": "Set Up Local Transport Discounts",
+          "detail": "Check city-specific student transport discounts, especially if you commute daily.",
+          "estimatedMinutes": 20,
+          "urgency": "low",
+          "order": 2,
+          "timing": "ongoing",
+          "priority": "optional",
+          "content": {
+            "type": "comparison-guide",
+            "sections": [
+              {
+                "type": "options",
+                "title": "Popular Student Transport Paths",
+                "items": [
+                  {
+                    "name": "London: 18+ Student Oyster",
+                    "description": "Discounted travel rates for eligible students in London.",
+                    "rating": 4.4,
+                    "tags": [
+                      "London",
+                      "Official"
+                    ],
+                    "link": {
+                      "type": "external",
+                      "url": "https://tfl.gov.uk/fares/free-and-discounted-travel/18-plus-student-oyster-photocard",
+                      "label": "Apply via TfL",
+                      "source": {
+                        "sourceType": "official",
+                        "sourceName": "Transport for London",
+                        "lastVerified": "2026-02-07"
+                      }
+                    },
+                    "source": {
+                      "sourceType": "official",
+                      "sourceName": "Transport for London",
+                      "lastVerified": "2026-02-07"
+                    }
+                  },
+                  {
+                    "name": "Regional Bus/Metro Student Pass",
+                    "description": "Most cities have student fare pages through local operators.",
+                    "rating": 4.0,
+                    "tags": [
+                      "Regional",
+                      "City dependent"
+                    ],
+                    "link": {
+                      "type": "external",
+                      "url": "https://www.gov.uk/student-discounts",
+                      "label": "Check student discount guidance",
+                      "source": {
+                        "sourceType": "official",
+                        "sourceName": "GOV.UK",
+                        "lastVerified": "2026-02-07"
+                      }
+                    },
+                    "source": {
+                      "sourceType": "official",
+                      "sourceName": "GOV.UK",
+                      "lastVerified": "2026-02-07"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "tips",
+                "title": "Practical Tips",
+                "items": [
+                  {
+                    "text": "Compare weekly and monthly pass pricing before committing.",
+                    "author": "Arrival UK"
+                  },
+                  {
+                    "text": "Use contactless fare capping where available if your schedule changes often.",
+                    "author": "Student Community"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "work_career",
+      "title": "Work & Career",
+      "subtitle": "Build your internship and part-time job runway",
+      "icon": "briefcase.fill",
+      "priority": "medium",
+      "urgency": "week2",
+      "accentColor": "#627D98",
+      "isVisible": true,
+      "order": 5,
+      "cityFilters": [],
+      "universityFilters": [],
+      "tasks": [
+        {
+          "id": "start_internship_search",
+          "title": "Start Internship Search",
+          "detail": "Set up a structured search flow early to secure better opportunities.",
+          "estimatedMinutes": 35,
+          "urgency": "medium",
+          "order": 1,
+          "timing": "first_month",
+          "priority": "should_do",
+          "content": {
+            "type": "process-guide",
+            "sections": [
+              {
+                "type": "overview",
+                "title": "Recommended Sequence",
+                "content": "Prepare your CV and LinkedIn first, then apply through university careers portals and trusted job boards."
+              },
+              {
+                "type": "steps",
+                "title": "Step-by-Step",
+                "items": [
+                  {
+                    "number": 1,
+                    "title": "Book Careers Service Appointment",
+                    "duration": "20-30 mins",
+                    "description": "Most universities provide CV and internship application review sessions.",
+                    "actions": [
+                      {
+                        "type": "official-link",
+                        "label": "Check GOV.UK job support resources",
+                        "url": "https://www.gov.uk/browse/working/finding-job",
+                        "source": {
+                          "sourceType": "official",
+                          "sourceName": "GOV.UK",
+                          "lastVerified": "2026-02-07"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "number": 2,
+                    "title": "Create Saved Searches",
+                    "duration": "10 mins",
+                    "description": "Use role + city filters and set weekly alerts.",
+                    "actions": [
+                      {
+                        "type": "official-link",
+                        "label": "Explore Prospects internships",
+                        "url": "https://www.prospects.ac.uk/jobs-and-work-experience",
+                        "source": {
+                          "sourceType": "university",
+                          "sourceName": "Prospects",
+                          "lastVerified": "2026-02-07"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "official-references",
+                "title": "Trusted Sources",
+                "items": [
+                  {
+                    "title": "GOV.UK - Finding a Job",
+                    "description": "Official guidance for job search and employment basics.",
+                    "url": "https://www.gov.uk/browse/working/finding-job",
+                    "source": {
+                      "sourceType": "official",
+                      "sourceName": "GOV.UK",
+                      "lastVerified": "2026-02-07"
+                    }
+                  },
+                  {
+                    "title": "Prospects - Jobs and Work Experience",
+                    "description": "Graduate-focused internships and careers guidance.",
+                    "url": "https://www.prospects.ac.uk/jobs-and-work-experience",
+                    "source": {
+                      "sourceType": "university",
+                      "sourceName": "Prospects",
+                      "lastVerified": "2026-02-07"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

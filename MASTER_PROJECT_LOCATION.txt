@@ -1,0 +1,5 @@
+MASTER PROJECT
+Path: /Users/abdulhannan/Desktop/arrival uk
+
+Use this folder as the single source of truth.
+Any other "arrival uk" paths are archived or symlinked to this path.
