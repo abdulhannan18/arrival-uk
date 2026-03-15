@@ -1,13 +1,13 @@
 # Claude Code Kickoff Prompt (Arrival UK)
 
 Use this repository as the only source of truth:
-`/Users/abdulhannan/Desktop/arrival uk`
+`/Users/abdulhannan/Documents/Projects/Arrival UK`
 
 Read this first:
-1. `/Users/abdulhannan/Desktop/arrival uk/CLAUDE_PROJECT_BRIEF.md`
-2. `/Users/abdulhannan/Desktop/arrival uk/ARCHITECTURE_DECISIONS.md`
-3. `/Users/abdulhannan/Desktop/arrival uk/DEVELOPER_HANDOFF.md`
-4. `/Users/abdulhannan/Desktop/arrival uk/CODEBASE_MAP.md`
+1. `docs/CLAUDE_PROJECT_BRIEF.md`
+2. `docs/ARCHITECTURE_DECISIONS.md`
+3. `docs/DEVELOPER_HANDOFF.md`
+4. `docs/CODEBASE_MAP.md`
 
 ## Mission
 Preserve all current progress and improve production readiness with zero regression and zero data loss.
@@ -24,13 +24,13 @@ Preserve all current progress and improve production readiness with zero regress
 1. Baseline
 - Run and record:
   - `git status --short --branch`
-  - `bash /Users/abdulhannan/Desktop/arrival uk/Scripts/line_counts.sh`
+  - `bash Scripts/line_counts.sh`
 
 2. Audit First (No Code Changes Yet)
 - Produce:
-  - `/Users/abdulhannan/Desktop/arrival uk/REPORT_AUDIT.md`
-  - `/Users/abdulhannan/Desktop/arrival uk/REPORT_BACKLOG.csv`
-  - `/Users/abdulhannan/Desktop/arrival uk/REPORT_EXEC_SUMMARY.md`
+  - `docs/REPORT_AUDIT.md`
+  - `docs/REPORT_BACKLOG.csv`
+  - `docs/REPORT_EXEC_SUMMARY.md`
 - Rank issues as `Critical`, `High`, `Medium`, `Low`.
 - For each issue include:
   - exact `file:line`
@@ -51,13 +51,13 @@ Preserve all current progress and improve production readiness with zero regress
 
 4. Required Validations Per Batch
 - Content validation:
-  - `swift /Users/abdulhannan/Desktop/arrival uk/Scripts/validate_content.swift`
+  - `swift Scripts/validate_content.swift`
 - iOS build:
-  - `xcodebuild -project "/Users/abdulhannan/Desktop/arrival uk/arrival uk.xcodeproj" -scheme "arrival uk" -destination "platform=iOS Simulator,name=iPhone 15" CODE_SIGNING_ALLOWED=NO build`
+  - `xcodebuild -project "arrival uk.xcodeproj" -scheme "arrival uk" -destination "platform=iOS Simulator,name=iPhone 15" CODE_SIGNING_ALLOWED=NO build`
 - Smoke:
-  - `bash /Users/abdulhannan/Desktop/arrival uk/Scripts/strict_smoke.sh`
+  - `bash Scripts/strict_smoke.sh`
 - Backend (when backend files change):
-  - `cd "/Users/abdulhannan/Desktop/arrival uk/backend/functions" && npm run lint && npm run build`
+  - `cd backend/functions && npm run lint && npm run build`
 
 ## Collaboration Safety
 1. Assume another coding agent may also be active in this repo.
@@ -73,9 +73,9 @@ Preserve all current progress and improve production readiness with zero regress
 5. Preserve visual/interaction consistency on Home + Category Detail flows.
 
 ## Deliverables
-1. `/Users/abdulhannan/Desktop/arrival uk/REPORT_FINAL_CHANGES.md`
-2. `/Users/abdulhannan/Desktop/arrival uk/REPORT_TEST_RESULTS.md`
-3. `/Users/abdulhannan/Desktop/arrival uk/REPORT_NEXT_STEPS.md`
+1. `docs/REPORT_FINAL_CHANGES.md`
+2. `docs/REPORT_TEST_RESULTS.md`
+3. `docs/REPORT_NEXT_STEPS.md`
 
 ## Acceptance Criteria
 1. App builds successfully on iPhone 15 simulator.
@@ -83,4 +83,3 @@ Preserve all current progress and improve production readiness with zero regress
 3. No data/progress loss.
 4. No newly introduced auth/privacy vulnerabilities.
 5. All changes are documented and test-verified.
-

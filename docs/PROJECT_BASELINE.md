@@ -2,20 +2,20 @@
 
 ## 1) Project Location and Directory Issue
 
-- Canonical project path: `/Users/abdulhannan/Desktop/arrival uk`
-- Alias path used by tools: `/Users/abdulhannan/Documents/New project`
-- Current state: working and resolved. `/Users/abdulhannan/Documents/New project` points to the same project directory.
+- Canonical project path: `/Users/abdulhannan/Documents/Projects/Arrival UK`
+- Older duplicate and alias paths were removed during cleanup.
+- Current state: one clean working repo remains in the Finder location above.
 
 ## 2) Current Code Inventory
 
 ### Main app files
-- `/Users/abdulhannan/Documents/New project/arrival uk/arrival_ukApp.swift`
-- `/Users/abdulhannan/Documents/New project/arrival uk/ContentView.swift`
-- `/Users/abdulhannan/Documents/New project/arrival uk/Data/content.json`
+- `arrival uk/arrival_ukApp.swift`
+- `arrival uk/ContentView.swift`
+- `arrival uk/Data/content.json`
 
 ### Project config and assets
-- `/Users/abdulhannan/Documents/New project/arrival uk.xcodeproj/project.pbxproj`
-- `/Users/abdulhannan/Documents/New project/arrival uk/Assets.xcassets/Contents.json`
+- `arrival uk.xcodeproj/project.pbxproj`
+- `arrival uk/Assets.xcassets/Contents.json`
 
 ### What is implemented now
 - SwiftUI single-screen checklist app with:
@@ -50,7 +50,7 @@
 ## 4) Build and Runtime Status
 
 - Command-line simulator build currently succeeds:
-- `xcodebuild -project "/Users/abdulhannan/Documents/New project/arrival uk.xcodeproj" -scheme "arrival uk" -destination "generic/platform=iOS Simulator" -derivedDataPath /tmp/arrivaluk-derived CODE_SIGNING_ALLOWED=NO build`
+- `xcodebuild -project "arrival uk.xcodeproj" -scheme "arrival uk" -destination "generic/platform=iOS Simulator" -derivedDataPath /tmp/arrivaluk-derived CODE_SIGNING_ALLOWED=NO build`
 - `content.json` is confirmed copied into app bundle at build output.
 - Earlier `UUID` vs `String` ID mismatch was resolved in `AddTaskSheet`.
 

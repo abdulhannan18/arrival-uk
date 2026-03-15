@@ -15,7 +15,7 @@
 
 ## Architecture Contract
 
-- [ ] Change respects `/Users/abdulhannan/Desktop/arrival uk/ARCHITECTURE_CONTRACT.md`
+- [ ] Change respects `docs/ARCHITECTURE_CONTRACT.md`
 - [ ] No cross-layer shortcut introduced
 - [ ] If boundary exception exists, documented in PR
 
@@ -31,16 +31,15 @@
 
 ## Security/Privacy
 
-- [ ] Checked `/Users/abdulhannan/Desktop/arrival uk/SECURITY_BASELINE.md`
-- [ ] Checked `/Users/abdulhannan/Desktop/arrival uk/PRIVACY_COMPLIANCE.md`
+- [ ] Checked `docs/SECURITY_BASELINE.md`
+- [ ] Checked `docs/PRIVACY_COMPLIANCE.md`
 - [ ] No secrets/tokens in source or logs
 - [ ] No new P0/P1 risk introduced
 
 ## Release Gates
 
-- [ ] This PR keeps `/Users/abdulhannan/Desktop/arrival uk/RELEASE_GATES.md` passable
+- [ ] This PR keeps `docs/RELEASE_GATES.md` passable
 
 ## Rollback Plan
 
 - How to revert if needed:
-

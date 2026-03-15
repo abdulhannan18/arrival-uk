@@ -1,0 +1,6 @@
+MASTER PROJECT
+Path: /Users/abdulhannan/Documents/Projects/Arrival UK
+
+Use this folder as the single source of truth.
+Key documentation now lives in `docs/` inside this folder.
+Any other "arrival uk" paths should be treated as stale unless explicitly recreated from this repo.

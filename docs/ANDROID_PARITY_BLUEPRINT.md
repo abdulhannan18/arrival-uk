@@ -7,7 +7,7 @@ This document defines the iOS-to-Android parity contract for Phase 8 so the core
 Use an 8px base unit in design tooling and code generation.
 
 - Base grid unit: `8`
-- iOS spacing source: `AppTheme.Spacing` in `/Users/abdulhannan/Desktop/arrival uk/arrival uk/AppSpacing.swift`
+- iOS spacing source: `AppTheme.Spacing` in `arrival uk/AppSpacing.swift`
 - Android mapping rule: `1 iOS spacing token step == same numeric dp value` on Compose
 
 Token mapping:
@@ -46,7 +46,7 @@ Animation mapping:
 
 Single source of truth for task prioritization:
 
-- iOS domain file: `/Users/abdulhannan/Desktop/arrival uk/arrival uk/Core/TaskPriorityDomain.swift`
+- iOS domain file: `arrival uk/Core/TaskPriorityDomain.swift`
 - `TaskEngine` is now thin state wiring and contains no SwiftUI animation logic.
 - Contract methods:
   - `partitionAndSort(from:isSettledMode:)`
@@ -67,7 +67,7 @@ Required parity rule:
 
 ## 5) UK Localization Contract
 
-- Shared formatting source: `/Users/abdulhannan/Desktop/arrival uk/arrival uk/Core/UKLocaleFormat.swift`
+- Shared formatting source: `arrival uk/Core/UKLocaleFormat.swift`
 - Date output: UK medium style (`en_GB`), e.g. `2 Mar 2026`
 - Currency output: GBP (`£`) regardless of device locale.
 
@@ -85,7 +85,7 @@ Android equivalent:
 Audit command used:
 
 ```sh
-find '/Users/abdulhannan/Desktop/arrival uk/arrival uk' -type f | rg '\.(png|jpg|jpeg|webp)$'
+find 'arrival uk' -type f | rg '\.(png|jpg|jpeg|webp)$'
 ```
 
 ## 7) Verification Checklist

@@ -2,7 +2,8 @@
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
-OUT="$ROOT/CODEBASE_DUMP.md"
+OUT="$ROOT/docs/CODEBASE_DUMP.md"
+mkdir -p "$(dirname "$OUT")"
 
 lang_for() {
   case "$1" in
@@ -32,6 +33,11 @@ lang_for() {
 
 while IFS= read -r file; do
   full_path="$ROOT/$file"
+
+  # Never read the dump file while regenerating it.
+  if [ "$full_path" = "$OUT" ]; then
+    continue
+  fi
 
   # Skip deleted/missing tracked files gracefully.
   if [ ! -f "$full_path" ]; then

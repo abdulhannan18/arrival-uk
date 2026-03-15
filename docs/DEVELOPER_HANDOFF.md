@@ -7,27 +7,27 @@ Owner context: iOS SwiftUI app, Android considered in future via feature/design 
 - App type: iOS SwiftUI checklist app for international students moving to the UK.
 - Core UX: Home categories -> category detail -> task detail -> official guidance links.
 - Runtime status: builds and launches successfully on simulator and iOS target.
-- Content source of truth: bundled JSON in `/Users/abdulhannan/Desktop/arrival uk/arrival uk/Data/content.json` and `/Users/abdulhannan/Desktop/arrival uk/arrival uk/Data/categories.json`.
+- Content source of truth: bundled JSON in `arrival uk/Data/content.json` and `arrival uk/Data/categories.json`.
 - Current bundled data: 5 categories in both files, with richer tasks in `content.json`.
 
 ## 2. Codebase Structure (What Lives Where)
-- `/Users/abdulhannan/Desktop/arrival uk/arrival uk/arrival_ukApp.swift`
+- `arrival uk/arrival_ukApp.swift`
   - App entry point.
-- `/Users/abdulhannan/Desktop/arrival uk/arrival uk/ContentView.swift`
+- `arrival uk/ContentView.swift`
   - Main feature shell and almost all UI composition.
   - Home screen, category cards, detail overlay, modal system, profile sheet wiring, task sheet wiring, help/privacy sheets.
-- `/Users/abdulhannan/Desktop/arrival uk/arrival uk/ContentData.swift`
+- `arrival uk/ContentData.swift`
   - ContentStore, bundle loading, payload merge/sanitize/normalize, validation and fallback helpers.
   - Progress persistence and restoration.
-- `/Users/abdulhannan/Desktop/arrival uk/arrival uk/Models.swift`
+- `arrival uk/Models.swift`
   - All task/category/content section models and sample data.
-- `/Users/abdulhannan/Desktop/arrival uk/arrival uk/DesignSystem.swift`
+- `arrival uk/DesignSystem.swift`
   - Theme tokens, spacing, motion, haptics, performance profile, layer z-index, modifiers.
-- `/Users/abdulhannan/Desktop/arrival uk/arrival uk/StudentProfile.swift`
+- `arrival uk/StudentProfile.swift`
   - Student profile store, Apple/Google auth state model, persistence.
-- `/Users/abdulhannan/Desktop/arrival uk/arrival uk/AdSystem.swift`
+- `arrival uk/AdSystem.swift`
   - Ad policy/consent/runtime abstraction and coordinator.
-- `/Users/abdulhannan/Desktop/arrival uk/Scripts/validate_content.swift`
+- `Scripts/validate_content.swift`
   - JSON integrity validator used before builds.
 
 ## 3. Design and Architecture Principles Already Applied
@@ -47,7 +47,7 @@ Owner context: iOS SwiftUI app, Android considered in future via feature/design 
 ## 4. Important Fixes Already Implemented
 
 ### 4.1 Content fallback merge no longer re-adds removed content
-- File: `/Users/abdulhannan/Desktop/arrival uk/arrival uk/ContentData.swift`
+- File: `arrival uk/ContentData.swift`
 - Key area: `mergePayload(...)` and caller flags in `resolveCategoriesFromBundle()`.
 - Change:
   - Added `includeFallbackOnlyCategories` flag.
@@ -59,7 +59,7 @@ Owner context: iOS SwiftUI app, Android considered in future via feature/design 
   - Intentionally removed tasks/categories are not silently reintroduced by sample fallback merge.
 
 ### 4.2 Progress snapshot decode moved off main path for bundle load
-- File: `/Users/abdulhannan/Desktop/arrival uk/arrival uk/ContentData.swift`
+- File: `arrival uk/ContentData.swift`
 - Key area: `loadFromBundle()` and new `decodeProgressSnapshot(storageKey:)`.
 - Change:
   - Bundle resolution and persisted snapshot decode occur in background queue.
@@ -68,7 +68,7 @@ Owner context: iOS SwiftUI app, Android considered in future via feature/design 
   - Lower risk of startup hitch/jank.
 
 ### 4.3 Profile save hardened for auth provider correctness
-- File: `/Users/abdulhannan/Desktop/arrival uk/arrival uk/ContentView.swift`
+- File: `arrival uk/ContentView.swift`
 - Key area: `saveProfile()` in `ProfileSetupSheet`.
 - Change:
   - Persist Google identity only when `authProvider == .google`.
@@ -117,7 +117,7 @@ To stay Android-ready:
 - Avoid iOS-only assumptions in data model semantics.
 
 ## 9. Build and Validation Commands
-Run from project root `/Users/abdulhannan/Desktop/arrival uk`.
+Run from the project root.
 
 - Validate content:
   - `swift Scripts/validate_content.swift`
@@ -161,7 +161,7 @@ Keep this a mechanical extraction only (no logic changes) to reduce regression r
 
 ### Completed in code
 - URL security policy implemented:
-  - Added `/Users/abdulhannan/Desktop/arrival uk/arrival uk/Security/ExternalURLPolicy.swift`.
+  - Added `arrival uk/Security/ExternalURLPolicy.swift`.
   - Only allows `https` globally.
   - Allows `http` only for trusted suffixes (`gov.uk`, `ac.uk`, `nhs.uk`, etc.).
   - Blocks localhost/local-network style hosts for external navigation.
@@ -172,10 +172,10 @@ Keep this a mechanical extraction only (no logic changes) to reduce regression r
   - `ContentData` validator now uses `ExternalURLPolicy.normalizedURL(...)`.
   - Official/university trust checks use the same policy layer to avoid policy drift.
 - Auth-state integrity hardened:
-  - Added `/Users/abdulhannan/Desktop/arrival uk/arrival uk/Auth/AuthStateValidator.swift`.
+  - Added `arrival uk/Auth/AuthStateValidator.swift`.
   - Persisted profile auth snapshot is normalized on load to repair invalid provider/id combinations.
 - Secure sign-out path added:
-  - Added `/Users/abdulhannan/Desktop/arrival uk/arrival uk/Security/KeychainManager.swift`.
+  - Added `arrival uk/Security/KeychainManager.swift`.
   - Added `secureSignOut()` in `StudentProfileStore` and wired profile sign-out flow to call it.
   - Keychain keys are reserved for future auth token/refresh token storage and are cleared on sign-out.
 - ATS hardening set explicitly in build settings:
@@ -196,11 +196,11 @@ Keep this a mechanical extraction only (no logic changes) to reduce regression r
 These are the remaining launch-facing items that still require attention:
 
 - Validate legal URLs are live and correct:
-  - Values are configured in `/Users/abdulhannan/Desktop/arrival uk/arrival uk/Core/AppConfig.swift` (`AppConfig.legal`).
+  - Values are configured in `arrival uk/Core/AppConfig.swift` (`AppConfig.legal`).
   - Ensure `https://arrivaluk.app/privacy`, `/terms`, `/support`, `/delete-data` are live before TestFlight/App Store submission.
 - Validate crash reporting end-to-end (release-like build):
-  - Runtime wiring exists in `/Users/abdulhannan/Desktop/arrival uk/arrival uk/Core/CrashReporter.swift` and app bootstrap.
-  - dSYM upload script exists via `/Users/abdulhannan/Desktop/arrival uk/Scripts/crashlytics_run.sh` build phase.
+  - Runtime wiring exists in `arrival uk/Core/CrashReporter.swift` and app bootstrap.
+  - dSYM upload script exists via `Scripts/crashlytics_run.sh` build phase.
   - Still requires a real device Release build validation in Firebase Crashlytics console.
 - Add explicit data export flow (GDPR/UK GDPR readiness):
   - Data deletion is exposed as a link; export is not yet implemented.

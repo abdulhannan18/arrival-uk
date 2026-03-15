@@ -1,22 +1,22 @@
 # Codebase Map
 
-- Repo root: `/Users/abdulhannan/Desktop/arrival uk`
-- Commit: `c0b39a4`
-- Tracked files: `104`
-- Tracked LOC: `23200`
-- Full dump generator: `bash Scripts/build_codebase_dump.sh` (writes `CODEBASE_DUMP.md`, ignored by git)
+- Finder location: `/Users/abdulhannan/Documents/Projects/Arrival UK`
+- Repo root: `.`
+- Full dump generator: `bash Scripts/build_codebase_dump.sh` (writes `docs/CODEBASE_DUMP.md`)
 - Line count script: `bash Scripts/line_counts.sh`
 
 ## Top-Level
 - .git
 - .github
+- AppConfig
+- ArrivalWidgetExtension
+- docs
 - Scripts
 - arrival uk
 - arrival uk.xcodeproj
 - arrival ukTests
 - backend
 - backend-docs
-- backups
 
 ## Notable Components
 
