@@ -3,7 +3,16 @@
     {
       "id": "before_arrival",
       "title": "Before Arrival",
+      "subtitle": "Must complete before landing",
+      "categoryType": "arrival",
       "icon": "airplane.departure",
+      "gradient": [
+        "#5F7AE0",
+        "#6E53AA"
+      ],
+      "priority": "critical",
+      "urgency": "immediate",
+      "order": 1,
       "tasks": [
         {
           "id": "before_visa_check",
@@ -38,9 +47,55 @@
       ]
     },
     {
+      "id": "academic_setup",
+      "title": "Academic Setup",
+      "subtitle": "Get course systems ready",
+      "categoryType": "academic",
+      "icon": "graduationcap.fill",
+      "gradient": [
+        "#9B6A43",
+        "#7F5436"
+      ],
+      "priority": "high",
+      "urgency": "week1",
+      "order": 2,
+      "tasks": [
+        {
+          "id": "academic_portal_login",
+          "title": "Access university portal",
+          "detail": "Activate your student account and verify email + timetable access.",
+          "timing": "first_week",
+          "priority": "must_do"
+        },
+        {
+          "id": "academic_module_registration",
+          "title": "Register modules",
+          "detail": "Submit module choices before the deadline and keep confirmation screenshots.",
+          "timing": "first_week",
+          "priority": "must_do"
+        },
+        {
+          "id": "academic_library_access",
+          "title": "Set up library access",
+          "detail": "Enable online journals, borrowing rights, and off-campus VPN access.",
+          "timing": "first_month",
+          "priority": "should_do"
+        }
+      ]
+    },
+    {
       "id": "health_admin",
       "title": "Health & Admin",
-      "icon": "heart.text.square",
+      "subtitle": "Legal and healthcare setup",
+      "categoryType": "wellness",
+      "icon": "cross.case.fill",
+      "gradient": [
+        "#9C4B3E",
+        "#7A3A31"
+      ],
+      "priority": "high",
+      "urgency": "week1",
+      "order": 3,
       "tasks": [
         {
           "id": "health_gp",
@@ -48,84 +103,566 @@
           "detail": "Do this soon after settling so healthcare access is ready when needed.",
           "timing": "first_week",
           "priority": "must_do",
-          "sourceTitle": "How to Register with a GP (NHS)",
+          "sourceTitle": "NHS GP Registration",
           "sourceURL": "https://www.nhs.uk/nhs-services/gps/how-to-register-with-a-gp-surgery/"
         },
         {
           "id": "health_ni",
           "title": "Apply for National Insurance number",
-          "detail": "Needed for legal employment and correct tax setup in part-time or full-time work.",
+          "detail": "Needed for legal work and correct tax setup.",
           "timing": "first_month",
           "priority": "must_do",
-          "sourceTitle": "Apply for a National Insurance Number (GOV.UK)",
+          "sourceTitle": "Apply for National Insurance Number",
           "sourceURL": "https://www.gov.uk/apply-national-insurance-number"
         },
         {
           "id": "health_council_tax",
-          "title": "Submit council tax student exemption",
-          "detail": "Use your student proof to avoid paying full council tax where eligible.",
+          "title": "Submit council tax exemption",
+          "detail": "Use student proof to avoid paying full council tax where eligible.",
           "timing": "first_month",
-          "priority": "should_do",
-          "sourceTitle": "Council Tax Discounts for Students (GOV.UK)",
-          "sourceURL": "https://www.gov.uk/council-tax/discounts-for-full-time-students"
+          "priority": "should_do"
         }
       ]
     },
     {
       "id": "money_banking",
       "title": "Money & Banking",
-      "icon": "banknote",
+      "subtitle": "Money setup and daily finance",
+      "categoryType": "finance",
+      "icon": "sterlingsign.circle.fill",
+      "gradient": [
+        "#8A6D3B",
+        "#705730"
+      ],
+      "priority": "high",
+      "urgency": "week1",
+      "order": 4,
       "tasks": [
         {
           "id": "money_open_account",
           "title": "Open a UK bank account",
-          "detail": "Compare student accounts and keep your enrollment letter ready for verification.",
+          "detail": "Compare student accounts and keep enrollment proof ready.",
           "timing": "first_week",
           "priority": "must_do"
         },
         {
-          "id": "money_alerts",
-          "title": "Enable spending alerts and limits",
-          "detail": "Turn on transaction notifications to avoid overspending during early setup weeks.",
+          "id": "money_enable_alerts",
+          "title": "Enable spending alerts",
+          "detail": "Turn on transaction notifications to avoid overspending.",
           "timing": "first_week",
           "priority": "should_do"
         },
         {
-          "id": "money_emergency_buffer",
-          "title": "Create a small emergency buffer",
-          "detail": "Aim for a minimum reserve so unexpected transport or medical costs are covered.",
+          "id": "money_setup_buffer",
+          "title": "Create emergency buffer",
+          "detail": "Set a minimum reserve for unexpected costs.",
+          "timing": "first_month",
+          "priority": "optional"
+        },
+        {
+          "id": "money_budget_sheet",
+          "title": "Create monthly budget sheet",
+          "detail": "Track rent, groceries, transport, and subscriptions.",
+          "timing": "first_month",
+          "priority": "should_do"
+        }
+      ]
+    },
+    {
+      "id": "housing",
+      "title": "Housing & Accommodation",
+      "subtitle": "Set up safe and legal housing",
+      "categoryType": "housing",
+      "icon": "house.fill",
+      "gradient": [
+        "#5F7A8A",
+        "#4B6170"
+      ],
+      "priority": "high",
+      "urgency": "week1",
+      "order": 5,
+      "tasks": [
+        {
+          "id": "housing_contract_review",
+          "title": "Review tenancy agreement",
+          "detail": "Check notice period, deposit protection, and included bills.",
+          "timing": "week_before_arrival",
+          "priority": "must_do"
+        },
+        {
+          "id": "housing_inventory_photos",
+          "title": "Take move-in inventory photos",
+          "detail": "Document room condition on day one to avoid deposit disputes.",
+          "timing": "first_week",
+          "priority": "must_do"
+        },
+        {
+          "id": "housing_utilities_check",
+          "title": "Confirm utility setup",
+          "detail": "Verify electricity, heating, and water are active and billed correctly.",
+          "timing": "first_week",
+          "priority": "should_do"
+        },
+        {
+          "id": "housing_landlord_contact",
+          "title": "Save landlord and emergency contact",
+          "detail": "Keep contact details accessible for urgent repairs.",
+          "timing": "first_week",
+          "priority": "should_do"
+        },
+        {
+          "id": "housing_contents_check",
+          "title": "Consider contents insurance",
+          "detail": "Protect your laptop and valuables in shared accommodation.",
           "timing": "first_month",
           "priority": "optional"
         }
       ]
     },
     {
-      "id": "travel_discounts",
-      "title": "Travel & Discounts",
-      "icon": "tram",
+      "id": "work_career",
+      "title": "Work & Career",
+      "subtitle": "Build legal work readiness",
+      "categoryType": "career",
+      "icon": "briefcase.fill",
+      "gradient": [
+        "#6A4C93",
+        "#553D78"
+      ],
+      "priority": "medium",
+      "urgency": "week2",
+      "order": 6,
       "tasks": [
         {
-          "id": "travel_railcard",
-          "title": "Buy a 16-25 Railcard (if eligible)",
-          "detail": "Can reduce train fares significantly during term and holiday travel.",
-          "timing": "first_month",
-          "priority": "should_do",
-          "sourceTitle": "16-25 Railcard",
-          "sourceURL": "https://www.16-25railcard.co.uk/"
-        },
-        {
-          "id": "travel_local_pass",
-          "title": "Check local student transport pass",
-          "detail": "Many cities offer discounted bus or metro options for students.",
+          "id": "work_career_cv",
+          "title": "Prepare UK-style CV",
+          "detail": "Adapt format for UK employers and include availability.",
           "timing": "first_month",
           "priority": "should_do"
         },
         {
-          "id": "travel_route_setup",
-          "title": "Save key routes in transport apps",
-          "detail": "Pre-save campus, accommodation, supermarket, and nearest hospital routes.",
+          "id": "work_career_hours",
+          "title": "Understand visa work limits",
+          "detail": "Confirm term-time and vacation working hour restrictions.",
           "timing": "first_week",
+          "priority": "must_do"
+        },
+        {
+          "id": "work_career_accounts",
+          "title": "Create job platform profiles",
+          "detail": "Set up LinkedIn and student job portals with alerts.",
+          "timing": "first_month",
           "priority": "optional"
+        }
+      ]
+    },
+    {
+      "id": "travel_transport",
+      "title": "Travel & Transport",
+      "subtitle": "Move around affordably",
+      "categoryType": "transport",
+      "icon": "tram.fill",
+      "gradient": [
+        "#4A6C5A",
+        "#3A5648"
+      ],
+      "priority": "medium",
+      "urgency": "week2",
+      "order": 7,
+      "tasks": [
+        {
+          "id": "travel_oyster",
+          "title": "Set up local transport card",
+          "detail": "Get Oyster/region card and connect contactless payment.",
+          "timing": "first_week",
+          "priority": "must_do"
+        },
+        {
+          "id": "travel_railcard",
+          "title": "Apply for student railcard",
+          "detail": "Reduce long-distance train costs across the UK.",
+          "timing": "first_month",
+          "priority": "should_do"
+        },
+        {
+          "id": "travel_routes",
+          "title": "Save key routes",
+          "detail": "Pin university, accommodation, GP, and station routes.",
+          "timing": "first_week",
+          "priority": "should_do"
+        },
+        {
+          "id": "travel_night_safety",
+          "title": "Plan safe night transport",
+          "detail": "Know late bus/train options and trusted taxi apps.",
+          "timing": "first_month",
+          "priority": "optional"
+        }
+      ]
+    },
+    {
+      "id": "legal_docs",
+      "title": "Legal & Documentation",
+      "subtitle": "Keep records clean and compliant",
+      "categoryType": "legal",
+      "icon": "doc.text.fill",
+      "gradient": [
+        "#4B5C80",
+        "#3E4C6A"
+      ],
+      "priority": "medium",
+      "urgency": "week2",
+      "order": 8,
+      "tasks": [
+        {
+          "id": "legal_copy_docs",
+          "title": "Create secure digital copies",
+          "detail": "Store passport, visa, BRP, and tenancy copies in encrypted storage.",
+          "timing": "first_week",
+          "priority": "must_do"
+        },
+        {
+          "id": "legal_brp_collection",
+          "title": "Confirm BRP/eVisa status",
+          "detail": "Check current UKVI process and collection deadlines.",
+          "timing": "first_week",
+          "priority": "must_do"
+        },
+        {
+          "id": "legal_deadline_tracker",
+          "title": "Track key legal deadlines",
+          "detail": "Set reminders for visa, tenancy, and enrollment deadlines.",
+          "timing": "first_month",
+          "priority": "should_do"
+        }
+      ]
+    },
+    {
+      "id": "shopping_essentials",
+      "title": "Shopping Essentials",
+      "subtitle": "Set up core living supplies",
+      "categoryType": "shopping",
+      "icon": "bag.fill",
+      "gradient": [
+        "#A67C52",
+        "#896442"
+      ],
+      "priority": "medium",
+      "urgency": "week1",
+      "order": 9,
+      "tasks": [
+        {
+          "id": "shopping_bedding",
+          "title": "Buy bedding and room essentials",
+          "detail": "Prioritize bedding, toiletries, and cleaning supplies for first week.",
+          "timing": "first_week",
+          "priority": "must_do"
+        },
+        {
+          "id": "shopping_kitchen",
+          "title": "Build basic kitchen kit",
+          "detail": "Get reusable containers, pan, knife, mug, and cutlery.",
+          "timing": "first_week",
+          "priority": "should_do"
+        },
+        {
+          "id": "shopping_grocery_apps",
+          "title": "Install grocery and deal apps",
+          "detail": "Use apps for delivery windows, coupons, and student discounts.",
+          "timing": "first_week",
+          "priority": "should_do"
+        },
+        {
+          "id": "shopping_compare_prices",
+          "title": "Compare local store pricing",
+          "detail": "Identify low-cost weekly shopping route.",
+          "timing": "first_month",
+          "priority": "optional"
+        },
+        {
+          "id": "shopping_secondhand",
+          "title": "Check second-hand options",
+          "detail": "Save money with verified second-hand marketplaces.",
+          "timing": "first_month",
+          "priority": "optional"
+        },
+        {
+          "id": "shopping_winter_gear",
+          "title": "Prepare weather-appropriate clothing",
+          "detail": "Plan for rain and winter temperature shifts.",
+          "timing": "first_month",
+          "priority": "should_do"
+        }
+      ]
+    },
+    {
+      "id": "communication_setup",
+      "title": "Communication Setup",
+      "subtitle": "Keep reliable contact channels",
+      "categoryType": "communication",
+      "icon": "iphone",
+      "gradient": [
+        "#1E3A8A",
+        "#172D6C"
+      ],
+      "priority": "medium",
+      "urgency": "week1",
+      "order": 10,
+      "tasks": [
+        {
+          "id": "communication_sim",
+          "title": "Get UK SIM card",
+          "detail": "Compare plans and activate a UK number for banking and services.",
+          "timing": "first_week",
+          "priority": "must_do"
+        },
+        {
+          "id": "communication_emergency_contacts",
+          "title": "Save emergency and university contacts",
+          "detail": "Store critical numbers for support and emergencies.",
+          "timing": "first_week",
+          "priority": "must_do"
+        }
+      ]
+    },
+    {
+      "id": "insurance_safety",
+      "title": "Insurance & Safety",
+      "subtitle": "Protect yourself and belongings",
+      "categoryType": "insurance",
+      "icon": "shield.fill",
+      "gradient": [
+        "#5E6F7D",
+        "#4B5965"
+      ],
+      "priority": "medium",
+      "urgency": "week2",
+      "order": 11,
+      "tasks": [
+        {
+          "id": "insurance_health_cover",
+          "title": "Review health coverage",
+          "detail": "Understand NHS eligibility and any private insurance needs.",
+          "timing": "first_month",
+          "priority": "should_do"
+        },
+        {
+          "id": "insurance_property",
+          "title": "Consider contents insurance",
+          "detail": "Protect electronics and valuables in shared accommodation.",
+          "timing": "first_month",
+          "priority": "optional"
+        },
+        {
+          "id": "insurance_local_safety",
+          "title": "Learn local safety basics",
+          "detail": "Identify safe routes, emergency numbers, and campus resources.",
+          "timing": "first_week",
+          "priority": "must_do"
+        }
+      ]
+    },
+    {
+      "id": "student_discounts",
+      "title": "Student Discounts",
+      "subtitle": "Reduce ongoing monthly spend",
+      "categoryType": "discounts",
+      "icon": "creditcard.fill",
+      "gradient": [
+        "#8A6074",
+        "#6F4E5E"
+      ],
+      "priority": "low",
+      "urgency": "anytime",
+      "order": 12,
+      "tasks": [
+        {
+          "id": "discounts_totum",
+          "title": "Apply for TOTUM/UNiDAYS",
+          "detail": "Unlock verified student discounts across brands.",
+          "timing": "first_month",
+          "priority": "should_do"
+        },
+        {
+          "id": "discounts_transport",
+          "title": "Enable transport student discounts",
+          "detail": "Link your student status for travel savings.",
+          "timing": "first_month",
+          "priority": "should_do"
+        },
+        {
+          "id": "discounts_grocery",
+          "title": "Track weekly discount windows",
+          "detail": "Use scheduled offers from local supermarkets.",
+          "timing": "ongoing",
+          "priority": "optional"
+        },
+        {
+          "id": "discounts_software",
+          "title": "Claim software student plans",
+          "detail": "Get discounted cloud storage and productivity tools.",
+          "timing": "first_month",
+          "priority": "optional"
+        },
+        {
+          "id": "discounts_entertainment",
+          "title": "Set entertainment budget caps",
+          "detail": "Use student plans without overspending.",
+          "timing": "ongoing",
+          "priority": "optional"
+        }
+      ]
+    },
+    {
+      "id": "internet_tech",
+      "title": "Internet & Tech",
+      "subtitle": "Keep devices and access reliable",
+      "categoryType": "internet",
+      "icon": "wifi",
+      "gradient": [
+        "#3E6D8C",
+        "#32586F"
+      ],
+      "priority": "low",
+      "urgency": "week1",
+      "order": 13,
+      "tasks": [
+        {
+          "id": "internet_broadband",
+          "title": "Confirm home broadband",
+          "detail": "Check speed, contract terms, and installation date.",
+          "timing": "first_week",
+          "priority": "must_do"
+        },
+        {
+          "id": "internet_backup_data",
+          "title": "Set mobile data backup",
+          "detail": "Prepare hotspot fallback for study deadlines.",
+          "timing": "first_week",
+          "priority": "should_do"
+        },
+        {
+          "id": "internet_security",
+          "title": "Secure your devices",
+          "detail": "Enable updates, password manager, and 2FA.",
+          "timing": "first_month",
+          "priority": "should_do"
+        }
+      ]
+    },
+    {
+      "id": "social_networking",
+      "title": "Social & Networking",
+      "subtitle": "Build support and opportunities",
+      "categoryType": "social",
+      "icon": "person.3.fill",
+      "gradient": [
+        "#7A5C67",
+        "#634A54"
+      ],
+      "priority": "low",
+      "urgency": "anytime",
+      "order": 14,
+      "tasks": [
+        {
+          "id": "social_join_groups",
+          "title": "Join student groups",
+          "detail": "Find official course and international student communities.",
+          "timing": "first_week",
+          "priority": "should_do"
+        },
+        {
+          "id": "social_attend_events",
+          "title": "Attend welcome events",
+          "detail": "Use early events to build your support network.",
+          "timing": "first_month",
+          "priority": "should_do"
+        },
+        {
+          "id": "social_mentors",
+          "title": "Connect with mentors",
+          "detail": "Identify peer mentors for study and city guidance.",
+          "timing": "first_month",
+          "priority": "optional"
+        },
+        {
+          "id": "social_boundaries",
+          "title": "Set healthy social boundaries",
+          "detail": "Balance academics, wellbeing, and social commitments.",
+          "timing": "ongoing",
+          "priority": "optional"
+        }
+      ]
+    },
+    {
+      "id": "student_life",
+      "title": "Student Life Essentials",
+      "subtitle": "Build sustainable routines",
+      "categoryType": "lifestyle",
+      "icon": "backpack.fill",
+      "gradient": [
+        "#8F6842",
+        "#735236"
+      ],
+      "priority": "low",
+      "urgency": "anytime",
+      "order": 15,
+      "tasks": [
+        {
+          "id": "life_weekly_planning",
+          "title": "Set weekly planning routine",
+          "detail": "Use one weekly review to plan study, work, and errands.",
+          "timing": "ongoing",
+          "priority": "should_do"
+        },
+        {
+          "id": "life_health_habits",
+          "title": "Track sleep and meal habits",
+          "detail": "Create a sustainable routine for energy and focus.",
+          "timing": "ongoing",
+          "priority": "optional"
+        },
+        {
+          "id": "life_financial_checkin",
+          "title": "Monthly financial check-in",
+          "detail": "Review budget drift and adjust spending targets.",
+          "timing": "ongoing",
+          "priority": "should_do"
+        },
+        {
+          "id": "life_admin_cleanup",
+          "title": "Monthly admin cleanup",
+          "detail": "Organize digital files, receipts, and official emails.",
+          "timing": "ongoing",
+          "priority": "optional"
+        },
+        {
+          "id": "life_personal_goals",
+          "title": "Set personal learning goals",
+          "detail": "Define skill-building goals outside coursework.",
+          "timing": "ongoing",
+          "priority": "optional"
+        },
+        {
+          "id": "life_support_network",
+          "title": "Maintain support check-ins",
+          "detail": "Keep regular contact with trusted friends/family.",
+          "timing": "ongoing",
+          "priority": "optional"
+        },
+        {
+          "id": "life_document_backups",
+          "title": "Back up important documents",
+          "detail": "Keep secure copies of IDs, banking, and study files.",
+          "timing": "ongoing",
+          "priority": "should_do"
+        },
+        {
+          "id": "life_review_progress",
+          "title": "Review progress each month",
+          "detail": "Track completed tasks and identify next priorities.",
+          "timing": "ongoing",
+          "priority": "should_do"
         }
       ]
     }

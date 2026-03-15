@@ -1,0 +1,52 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isImage() {
+      return request.resource.contentType in [
+        'image/jpeg',
+        'image/png',
+        'image/gif',
+        'image/webp'
+      ];
+    }
+
+    function isPDF() {
+      return request.resource.contentType == 'application/pdf';
+    }
+
+    // User profile images
+    match /users/{userId}/profile/{fileName} {
+      allow read: if isOwner(userId);
+      allow write: if isOwner(userId)
+                   && request.resource.size < 5 * 1024 * 1024
+                   && isImage();
+    }
+
+    // User private documents
+    match /users/{userId}/documents/{fileName} {
+      allow read: if isOwner(userId);
+      allow write: if isOwner(userId)
+                   && request.resource.size < 10 * 1024 * 1024
+                   && (isImage() || isPDF());
+    }
+
+    // Public app content
+    match /content/{path=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /public/{path=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+  }
+}

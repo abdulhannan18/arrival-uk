@@ -1,0 +1,25 @@
+{
+  "name": "arrival-uk-functions",
+  "private": true,
+  "engines": {
+    "node": "20"
+  },
+  "main": "lib/index.js",
+  "scripts": {
+    "build": "tsc -p .",
+    "lint": "tsc -p . --noEmit",
+    "serve": "firebase emulators:start --only functions",
+    "deploy": "firebase deploy --only functions",
+    "test": "npm run build && node --test \"lib/**/*.test.js\""
+  },
+  "dependencies": {
+    "@sendgrid/mail": "^8.1.5",
+    "firebase-admin": "^12.6.0",
+    "firebase-functions": "^5.1.1",
+    "twilio": "^5.5.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.33",
+    "typescript": "^5.6.3"
+  }
+}

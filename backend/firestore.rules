@@ -1,0 +1,311 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function userMutableRootKeys() {
+      return [
+        "profile",
+        "preferences",
+        "progress",
+      ];
+    }
+
+    function userProfileKeys() {
+      return [
+        "university",
+        "course",
+        "studyLevel",
+        "city",
+        "arrivalDate",
+        "nationality",
+        "homeCurrency",
+        "accommodationType",
+        "visaType",
+      ];
+    }
+
+    function userPreferenceKeys() {
+      return [
+        "language",
+        "notifications",
+        "privacy",
+      ];
+    }
+
+    function userNotificationPreferenceKeys() {
+      return [
+        "taskReminders",
+        "weeklyDigest",
+        "productUpdates",
+      ];
+    }
+
+    function userPrivacyPreferenceKeys() {
+      return [
+        "allowAnalytics",
+        "allowPersonalizedAds",
+        "dataSharing",
+      ];
+    }
+
+    function userProgressKeys() {
+      return [
+        "completedTasks",
+        "totalTasks",
+        "completionRate",
+        "lastActivityDate",
+      ];
+    }
+
+    function isNullableString(value, maxLength) {
+      return value == null || (value is string && value.size() <= maxLength);
+    }
+
+    function isNullableTimestamp(value) {
+      return value == null || value is timestamp;
+    }
+
+    function isValidUserProfile(data) {
+      return data.profile is map
+             && data.profile.keys().hasOnly(userProfileKeys())
+             && isNullableString(data.profile.university, 160)
+             && isNullableString(data.profile.course, 160)
+             && isNullableString(data.profile.studyLevel, 80)
+             && isNullableString(data.profile.city, 120)
+             && isNullableTimestamp(data.profile.arrivalDate)
+             && isNullableString(data.profile.nationality, 80)
+             && isNullableString(data.profile.homeCurrency, 16)
+             && isNullableString(data.profile.accommodationType, 80)
+             && isNullableString(data.profile.visaType, 80);
+    }
+
+    function isValidUserPreferences(data) {
+      return data.preferences is map
+             && data.preferences.keys().hasOnly(userPreferenceKeys())
+             && data.preferences.language is string
+             && data.preferences.language.size() > 0
+             && data.preferences.language.size() <= 16
+             && data.preferences.notifications is map
+             && data.preferences.notifications.keys().hasOnly(userNotificationPreferenceKeys())
+             && data.preferences.notifications.taskReminders is bool
+             && data.preferences.notifications.weeklyDigest is bool
+             && data.preferences.notifications.productUpdates is bool
+             && data.preferences.privacy is map
+             && data.preferences.privacy.keys().hasOnly(userPrivacyPreferenceKeys())
+             && data.preferences.privacy.allowAnalytics is bool
+             && data.preferences.privacy.allowPersonalizedAds is bool
+             && data.preferences.privacy.dataSharing is bool;
+    }
+
+    function isValidUserProgress(data) {
+      return data.progress is map
+             && data.progress.keys().hasOnly(userProgressKeys())
+             && data.progress.completedTasks is list
+             && data.progress.completedTasks.size() <= 1000
+             && data.progress.totalTasks is number
+             && data.progress.totalTasks >= 0
+             && data.progress.totalTasks <= 5000
+             && data.progress.completionRate is number
+             && data.progress.completionRate >= 0
+             && data.progress.completionRate <= 100
+             && isNullableTimestamp(data.progress.lastActivityDate);
+    }
+
+    function hasValidUserMutablePayload() {
+      return isValidUserProfile(request.resource.data)
+             && isValidUserPreferences(request.resource.data)
+             && isValidUserProgress(request.resource.data);
+    }
+
+    function hasOnlyUserMutableRootChanges() {
+      return request.resource.data
+        .diff(resource.data)
+        .affectedKeys()
+        .hasOnly(userMutableRootKeys());
+    }
+
+    function ticketPath(ticketId) {
+      return /databases/$(database)/documents/support/tickets/items/$(ticketId);
+    }
+
+    function ticketExists(ticketId) {
+      return exists(ticketPath(ticketId));
+    }
+
+    function isTicketOwner(ticketId) {
+      return isSignedIn()
+        && ticketExists(ticketId)
+        && get(ticketPath(ticketId)).data.userId == request.auth.uid;
+    }
+
+    function supportTicketCreateKeys() {
+      return [
+        "userId",
+        "subject",
+        "message",
+        "status",
+        "priority",
+        "category",
+        "createdAt",
+        "updatedAt",
+        "metadata",
+      ];
+    }
+
+    function supportTicketMessageCreateKeys() {
+      return [
+        "userId",
+        "message",
+        "createdAt",
+        "senderType",
+        "metadata",
+      ];
+    }
+
+    function isValidSupportTicketCreate() {
+      return request.resource.data.keys().hasOnly(supportTicketCreateKeys())
+             && request.resource.data.userId == request.auth.uid
+             && request.resource.data.subject is string
+             && request.resource.data.subject.size() > 0
+             && request.resource.data.subject.size() <= 160
+             && request.resource.data.message is string
+             && request.resource.data.message.size() > 0
+             && request.resource.data.message.size() <= 4000
+             && (!request.resource.data.keys().hasAny(["status"])
+                 || (request.resource.data.status is string
+                     && request.resource.data.status.size() > 0
+                     && request.resource.data.status.size() <= 32))
+             && (!request.resource.data.keys().hasAny(["priority"])
+                 || (request.resource.data.priority is string
+                     && request.resource.data.priority.size() > 0
+                     && request.resource.data.priority.size() <= 32))
+             && (!request.resource.data.keys().hasAny(["category"])
+                 || (request.resource.data.category is string
+                     && request.resource.data.category.size() > 0
+                     && request.resource.data.category.size() <= 80))
+             && (!request.resource.data.keys().hasAny(["createdAt"])
+                 || request.resource.data.createdAt is timestamp)
+             && (!request.resource.data.keys().hasAny(["updatedAt"])
+                 || request.resource.data.updatedAt is timestamp)
+             && (!request.resource.data.keys().hasAny(["metadata"])
+                 || (request.resource.data.metadata is map
+                     && request.resource.data.metadata.keys().size() <= 20));
+    }
+
+    function isValidSupportTicketMessageCreate() {
+      return request.resource.data.keys().hasOnly(supportTicketMessageCreateKeys())
+             && request.resource.data.userId == request.auth.uid
+             && request.resource.data.message is string
+             && request.resource.data.message.size() > 0
+             && request.resource.data.message.size() <= 4000
+             && (!request.resource.data.keys().hasAny(["senderType"])
+                 || (request.resource.data.senderType is string
+                     && request.resource.data.senderType.size() > 0
+                     && request.resource.data.senderType.size() <= 32))
+             && (!request.resource.data.keys().hasAny(["createdAt"])
+                 || request.resource.data.createdAt is timestamp)
+             && (!request.resource.data.keys().hasAny(["metadata"])
+                 || (request.resource.data.metadata is map
+                     && request.resource.data.metadata.keys().size() <= 20));
+    }
+
+    // User root profile
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      // User documents are created and deleted by trusted backend auth triggers.
+      allow create, delete: if isAdmin();
+      // End users can only mutate profile/preferences/progress trees.
+      allow update: if isAdmin()
+                    || (isOwner(userId)
+                        && hasOnlyUserMutableRootChanges()
+                        && hasValidUserMutablePayload());
+    }
+
+    match /users/{userId}/devices/{deviceId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // User nested data is backend-owned unless explicitly allowed above.
+    match /users/{userId}/{document=**} {
+      allow read, write: if isAdmin();
+    }
+
+    // Public content (authoring by admins only)
+    match /content/{document=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Analytics writes are backend-owned callable functions.
+    match /analytics/events/items/{eventId} {
+      // Client writes are disabled; analytics events are written by callable backend functions.
+      allow create: if false;
+      allow read: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    match /analytics/{document=**} {
+      allow read, write: if isAdmin();
+    }
+
+    // Support writes are backend-owned callable functions with server-side validation + rate limits.
+    match /support/tickets/items/{ticketId} {
+      allow create: if false;
+      allow read: if isSignedIn()
+                  && (resource.data.userId == request.auth.uid || isAdmin());
+      allow update, delete: if isAdmin();
+    }
+
+    match /support/tickets/items/{ticketId}/messages/{messageId} {
+      allow create: if false;
+      allow read: if isTicketOwner(ticketId) || isAdmin();
+      allow update, delete: if isAdmin();
+    }
+
+    // Referral and partnerships/public config
+    match /referrals/{referralCode} {
+      allow read: if isAdmin()
+                  || (isSignedIn() && resource.data.ownerUserId == request.auth.uid);
+      allow create: if false;
+      allow update: if isSignedIn()
+                    && resource.data.ownerUserId == request.auth.uid
+                    && request.resource.data.ownerUserId == resource.data.ownerUserId;
+      allow delete: if isAdmin();
+    }
+
+    match /partnerships/{document=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /config/{document=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Notification queue is backend-managed
+    match /notifications/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

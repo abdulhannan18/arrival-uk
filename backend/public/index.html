@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Arrival UK</title>
+    <meta name="description" content="Arrival UK legal and support pages." />
+    <style>
+      :root { color-scheme: light; }
+      body { font-family: -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 0; color: #0f172a; background: #f8fafc; }
+      header { background: #0b1324; color: #fff; padding: 28px 20px; }
+      header h1 { margin: 0; font-size: 22px; letter-spacing: 0.2px; }
+      header p { margin: 8px 0 0; opacity: 0.9; }
+      main { max-width: 880px; margin: 0 auto; padding: 20px; }
+      .card { background: #fff; border: 1px solid rgba(15, 23, 42, 0.08); border-radius: 14px; padding: 18px; box-shadow: 0 6px 24px rgba(2, 6, 23, 0.06); }
+      a { color: #2563eb; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      ul { padding-left: 18px; }
+      footer { max-width: 880px; margin: 0 auto; padding: 18px 20px 42px; color: #64748b; font-size: 13px; }
+      .links { display: grid; grid-template-columns: 1fr; gap: 12px; margin-top: 16px; }
+      @media (min-width: 720px) {
+        .links { grid-template-columns: 1fr 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Arrival UK</h1>
+      <p>Legal and support pages</p>
+    </header>
+    <main>
+      <div class="card">
+        <p>Use the links below to view our legal policies and support information.</p>
+        <div class="links">
+          <a href="/privacy">Privacy Policy</a>
+          <a href="/terms">Terms of Service</a>
+          <a href="/support">Support</a>
+          <a href="/delete-data">Data Deletion Request</a>
+        </div>
+      </div>
+    </main>
+    <footer>
+      <div>© <span id="y"></span> Arrival UK</div>
+      <script>document.getElementById("y").textContent = String(new Date().getFullYear());</script>
+    </footer>
+  </body>
+</html>
+

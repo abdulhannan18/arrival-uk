@@ -1,0 +1,150 @@
+name: Arrival UK CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend Lint + Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend/functions
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: backend/functions/package-lock.json
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Repository quality gate
+        working-directory: ${{ github.workspace }}
+        run: bash Scripts/quality_gate.sh
+
+      - name: Dependency security audit
+        run: |
+          set -euo pipefail
+          attempts=3
+          delay_seconds=2
+
+          for attempt in $(seq 1 "$attempts"); do
+            set +e
+            npm audit --omit=dev > /tmp/npm-audit.log 2>&1
+            status=$?
+            set -e
+
+            cat /tmp/npm-audit.log
+
+            if [ "$status" -eq 0 ]; then
+              echo "npm audit passed."
+              exit 0
+            fi
+
+            if grep -qiE "audit endpoint returned an error|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|503 Service Unavailable|504 Gateway Timeout" /tmp/npm-audit.log; then
+              if [ "$attempt" -lt "$attempts" ]; then
+                echo "Transient npm audit network failure (attempt ${attempt}/${attempts}); retrying in ${delay_seconds}s..."
+                sleep "$delay_seconds"
+                delay_seconds=$((delay_seconds * 2))
+                continue
+              fi
+              echo "npm audit endpoint unavailable after ${attempts} attempts; failing CI to keep signal strict."
+            fi
+
+            echo "npm audit failed."
+            exit "$status"
+          done
+
+      - name: Type check
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+  ios:
+    name: iOS Validate + Build
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Show line counts
+        run: bash Scripts/line_counts.sh
+
+      - name: Repository quality gate
+        run: bash Scripts/quality_gate.sh
+
+      - name: Validate content payloads
+        run: swift Scripts/validate_content.swift
+
+      - name: iOS unit smoke tests
+        run: bash Scripts/run_ios_unit_smoke.sh
+
+      - name: Resolve Swift packages
+        run: |
+          xcodebuild \
+            -project "arrival uk.xcodeproj" \
+            -scheme "arrival uk" \
+            -resolvePackageDependencies
+
+      - name: Pick simulator
+        id: pick_sim
+        run: |
+          set -euo pipefail
+          SIM_NAME="$(xcrun simctl list devices available \
+            | awk -F '[()]' '/iPhone 15/ {gsub(/^[[:space:]]+/, "", $1); print $1; exit}')"
+
+          if [ -z "${SIM_NAME}" ]; then
+            SIM_NAME="$(xcrun simctl list devices available \
+              | awk -F '[()]' '/iPhone/ {gsub(/^[[:space:]]+/, "", $1); print $1; exit}')"
+          fi
+
+          if [ -z "${SIM_NAME}" ]; then
+            echo "No available iPhone simulator found."
+            exit 1
+          fi
+
+          echo "sim_name=${SIM_NAME}" >> "$GITHUB_OUTPUT"
+          echo "Using simulator: ${SIM_NAME}"
+
+      - name: Build app
+        run: |
+          xcodebuild \
+            -project "arrival uk.xcodeproj" \
+            -scheme "arrival uk" \
+            -destination "platform=iOS Simulator,name=${{ steps.pick_sim.outputs.sim_name }}" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Run XCTest suite
+        run: |
+          xcodebuild \
+            -project "arrival uk.xcodeproj" \
+            -scheme "arrival uk" \
+            -destination "platform=iOS Simulator,name=${{ steps.pick_sim.outputs.sim_name }}" \
+            CODE_SIGNING_ALLOWED=NO \
+            test
+
+      - name: Static analyze
+        run: |
+          xcodebuild \
+            -project "arrival uk.xcodeproj" \
+            -scheme "arrival uk" \
+            -destination "platform=iOS Simulator,name=${{ steps.pick_sim.outputs.sim_name }}" \
+            CODE_SIGNING_ALLOWED=NO \
+            analyze
+
+      - name: Strict iOS smoke
+        run: bash Scripts/strict_smoke.sh

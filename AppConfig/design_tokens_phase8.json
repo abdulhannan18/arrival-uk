@@ -1,0 +1,43 @@
+{
+  "meta": {
+    "name": "arrival-uk-phase8",
+    "gridUnitPx": 8,
+    "locale": "en_GB",
+    "currency": "GBP"
+  },
+  "spacing": {
+    "xs": 4,
+    "sm": 8,
+    "md": 16,
+    "lg": 24,
+    "xl": 32,
+    "xxl": 40
+  },
+  "colors": {
+    "bgPrimary": "bgPrimary",
+    "bgSurface": "bgSurface",
+    "textPrimary": "textPrimary",
+    "textSecondary": "textSecondary",
+    "actionPrimary": "actionPrimary",
+    "statusUrgent": "statusUrgent"
+  },
+  "layout": {
+    "minimumTouchTarget": 44,
+    "heroCardCornerRadius": 28,
+    "heroCardShadowOpacity": 0.12,
+    "heroCardShadowRadius": 20,
+    "heroCardShadowYOffset": 12,
+    "heroSwipeCommitThreshold": 150,
+    "walletCardAspectRatio": 1.586,
+    "walletFanRotationDelta": 12,
+    "walletFanOffset": 45,
+    "walletCardCornerRadius": 22,
+    "walletPrivacyBlurRadius": 20,
+    "discoveryTileCornerRadius": 20,
+    "discoveryCardSize": 160
+  },
+  "androidMapping": {
+    "materialBlurEquivalent": "Modifier.blur() + Color.White.copy(alpha = 0.6f)",
+    "springProfile": "low-medium stiffness, dampingRatio ~= 0.8"
+  }
+}

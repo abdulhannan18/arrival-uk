@@ -1,0 +1,269 @@
+{
+  "phase_3_config": {
+    "swipe_threshold": 160,
+    "spring_damping": 0.8,
+    "hero_card_limit": 1,
+    "critical_urgency_threshold": 0.8
+  },
+  "phase_4_wallet": {
+    "required_docs": [
+      "passport",
+      "brp",
+      "university_cas"
+    ],
+    "biometric_enforced": true
+  },
+  "phase_14_marketplace": {
+    "identity_token_ttl_seconds": 600,
+    "providers": [
+      {
+        "provider_id": "monzo_student",
+        "display_name": "Monzo Student Account",
+        "service_type": "banking",
+        "cta_title": "Open Bank Account",
+        "required_docs": [
+          "passport",
+          "brp",
+          "university_cas"
+        ],
+        "requested_fields": [
+          "full_name",
+          "uk_address",
+          "passport_scan"
+        ],
+        "onboarding_url": "https://api.uk.arrival.com/v1/marketplace/providers/monzo_student/onboarding",
+        "universal_verify_path": "/verify/provider",
+        "completion_task_id": "money_bank_account",
+        "completion_category_id": "money_banking",
+        "payment_mode": "none",
+        "discovery_tag": "finance",
+        "supported_regions": [
+          "uk"
+        ]
+      },
+      {
+        "provider_id": "giffgaff_sim",
+        "display_name": "Giffgaff Student SIM",
+        "service_type": "sim",
+        "cta_title": "Get SIM Card",
+        "required_docs": [
+          "passport"
+        ],
+        "requested_fields": [
+          "full_name",
+          "uk_address"
+        ],
+        "onboarding_url": "https://api.uk.arrival.com/v1/marketplace/providers/giffgaff_sim/onboarding",
+        "universal_verify_path": "/verify/provider",
+        "completion_task_id": "communication_sim",
+        "completion_category_id": "communication_setup",
+        "payment_mode": "none",
+        "discovery_tag": "connectivity",
+        "supported_regions": [
+          "uk"
+        ]
+      },
+      {
+        "provider_id": "housing_escrow",
+        "display_name": "Housing Deposit Escrow",
+        "service_type": "housing",
+        "cta_title": "Secure Deposit",
+        "required_docs": [
+          "passport",
+          "tenancy"
+        ],
+        "requested_fields": [
+          "full_name",
+          "uk_address",
+          "passport_scan"
+        ],
+        "onboarding_url": "https://api.uk.arrival.com/v1/marketplace/providers/housing_escrow/onboarding",
+        "universal_verify_path": "/verify/provider",
+        "completion_task_id": "housing_contract_review",
+        "completion_category_id": "housing",
+        "payment_mode": "apple_pay",
+        "price_gbp": 50,
+        "discovery_tag": "housing",
+        "supported_regions": [
+          "uk"
+        ]
+      },
+      {
+        "provider_id": "chase_student_us",
+        "display_name": "Chase Student Account",
+        "service_type": "banking",
+        "cta_title": "Open US Bank Account",
+        "required_docs": [
+          "passport",
+          "ssn"
+        ],
+        "requested_fields": [
+          "full_name",
+          "uk_address",
+          "passport_scan"
+        ],
+        "onboarding_url": "https://api.us.arrival.com/v1/marketplace/providers/chase_student_us/onboarding",
+        "universal_verify_path": "/verify/provider",
+        "completion_task_id": "money_bank_account",
+        "completion_category_id": "money_banking",
+        "payment_mode": "none",
+        "discovery_tag": "finance",
+        "supported_regions": [
+          "usa"
+        ]
+      }
+    ]
+  },
+  "phase_15_global": {
+    "active_region": "uk",
+    "fallback_region": "uk",
+    "regions": [
+      {
+        "region": "uk",
+        "display_name": "United Kingdom",
+        "locale_identifier": "en_GB",
+        "currency_code": "GBP",
+        "date_format": "dd MMM yyyy",
+        "national_id_label": "National Insurance Number",
+        "api_base_url": "https://api.uk.arrival.com",
+        "legal_base_url": "https://uk.arrival.com",
+        "identity_requirements": [
+          "passport",
+          "brp",
+          "university_cas"
+        ],
+        "survival_task_boost_keywords": [
+          "gp",
+          "nhs",
+          "brp",
+          "bank account"
+        ],
+        "compliance_profile": "gdpr",
+        "consent_requirements": [
+          "terms_of_service",
+          "privacy_policy",
+          "data_processing",
+          "financial_disclosure"
+        ],
+        "semantic_localization": {},
+        "asset_localization": {
+          "post_office": "building.columns"
+        },
+        "marketplace_provider_allow_list": []
+      },
+      {
+        "region": "usa",
+        "display_name": "United States",
+        "locale_identifier": "en_US",
+        "currency_code": "USD",
+        "date_format": "MMM d, yyyy",
+        "national_id_label": "Social Security Number",
+        "api_base_url": "https://api.us.arrival.com",
+        "legal_base_url": "https://us.arrival.com",
+        "identity_requirements": [
+          "passport",
+          "ssn",
+          "tenancy"
+        ],
+        "survival_task_boost_keywords": [
+          "health insurance",
+          "ssn",
+          "social security",
+          "bank account"
+        ],
+        "compliance_profile": "ccpa_cpra",
+        "consent_requirements": [
+          "terms_of_service",
+          "privacy_policy",
+          "do_not_sell",
+          "financial_disclosure"
+        ],
+        "semantic_localization": {
+          "flat": "apartment",
+          "chemist": "pharmacy",
+          "tube": "subway",
+          "gp": "primary care doctor",
+          "post office": "US Mail"
+        },
+        "asset_localization": {
+          "post_office": "mailbox"
+        },
+        "marketplace_provider_allow_list": []
+      },
+      {
+        "region": "canada",
+        "display_name": "Canada",
+        "locale_identifier": "en_CA",
+        "currency_code": "CAD",
+        "date_format": "yyyy-MM-dd",
+        "national_id_label": "Social Insurance Number",
+        "api_base_url": "https://api.ca.arrival.com",
+        "legal_base_url": "https://ca.arrival.com",
+        "identity_requirements": [
+          "passport",
+          "sin",
+          "tenancy"
+        ],
+        "survival_task_boost_keywords": [
+          "health insurance",
+          "sin",
+          "bank account"
+        ],
+        "compliance_profile": "gdpr",
+        "consent_requirements": [
+          "terms_of_service",
+          "privacy_policy",
+          "data_processing"
+        ],
+        "semantic_localization": {
+          "flat": "apartment",
+          "chemist": "pharmacy",
+          "tube": "subway",
+          "gp": "family doctor",
+          "post office": "Canada Post"
+        },
+        "asset_localization": {
+          "post_office": "mailbox"
+        },
+        "marketplace_provider_allow_list": []
+      },
+      {
+        "region": "australia",
+        "display_name": "Australia",
+        "locale_identifier": "en_AU",
+        "currency_code": "AUD",
+        "date_format": "d MMM yyyy",
+        "national_id_label": "Tax File Number",
+        "api_base_url": "https://api.au.arrival.com",
+        "legal_base_url": "https://au.arrival.com",
+        "identity_requirements": [
+          "passport",
+          "tfn",
+          "tenancy"
+        ],
+        "survival_task_boost_keywords": [
+          "medicare",
+          "tfn",
+          "health insurance",
+          "bank account"
+        ],
+        "compliance_profile": "global",
+        "consent_requirements": [
+          "terms_of_service",
+          "privacy_policy",
+          "financial_disclosure"
+        ],
+        "semantic_localization": {
+          "flat": "apartment",
+          "chemist": "pharmacy",
+          "tube": "train",
+          "post office": "Australia Post"
+        },
+        "asset_localization": {
+          "post_office": "mailbox"
+        },
+        "marketplace_provider_allow_list": []
+      }
+    ]
+  }
+}
