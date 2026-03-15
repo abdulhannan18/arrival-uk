@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
-OUT="$ROOT/docs/CODEBASE_DUMP.md"
+OUT="$ROOT/docs/generated/CODEBASE_DUMP.md"
 mkdir -p "$(dirname "$OUT")"
 
 lang_for() {

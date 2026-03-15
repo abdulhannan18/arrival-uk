@@ -28,9 +28,9 @@ Preserve all current progress and improve production readiness with zero regress
 
 2. Audit First (No Code Changes Yet)
 - Produce:
-  - `docs/REPORT_AUDIT.md`
-  - `docs/REPORT_BACKLOG.csv`
-  - `docs/REPORT_EXEC_SUMMARY.md`
+  - `docs/reports/REPORT_AUDIT.md`
+  - `docs/reports/REPORT_BACKLOG.csv`
+  - `docs/reports/REPORT_EXEC_SUMMARY.md`
 - Rank issues as `Critical`, `High`, `Medium`, `Low`.
 - For each issue include:
   - exact `file:line`
@@ -73,9 +73,9 @@ Preserve all current progress and improve production readiness with zero regress
 5. Preserve visual/interaction consistency on Home + Category Detail flows.
 
 ## Deliverables
-1. `docs/REPORT_FINAL_CHANGES.md`
-2. `docs/REPORT_TEST_RESULTS.md`
-3. `docs/REPORT_NEXT_STEPS.md`
+1. `docs/reports/REPORT_FINAL_CHANGES.md`
+2. `docs/reports/REPORT_TEST_RESULTS.md`
+3. `docs/reports/REPORT_NEXT_STEPS.md`
 
 ## Acceptance Criteria
 1. App builds successfully on iPhone 15 simulator.

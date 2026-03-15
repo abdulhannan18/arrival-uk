@@ -21,11 +21,11 @@ Last updated: 2026-02-10
 
 ## Added in this chunk (net-new)
 - Backend architecture document:
-  - `backend-docs/firebase-architecture.md`
+  - `docs/backend/firebase-architecture.md`
 - Firestore data model and index plan:
-  - `backend-docs/firestore-data-model.md`
+  - `docs/backend/firestore-data-model.md`
 - REST API v1 contract draft:
-  - `backend-docs/api-specification-v1.md`
+  - `docs/backend/api-specification-v1.md`
 - Cloud Functions scaffold for auth lifecycle:
   - `backend/functions/auth.ts`
   - `backend/functions/package.json`

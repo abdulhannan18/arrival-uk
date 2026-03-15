@@ -67,6 +67,7 @@ fastlane/test_output
 DerivedData/
 build/
 backups/
+docs/generated/
 *.zip
 *.tgz
 *.tar.gz

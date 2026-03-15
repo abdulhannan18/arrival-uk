@@ -12,7 +12,7 @@ Owner intent: production-grade iOS app now, Android-ready architecture next, zer
 - Architecture decisions: `docs/ARCHITECTURE_DECISIONS.md`
 - Handoff context: `docs/DEVELOPER_HANDOFF.md`
 - Current code map: `docs/CODEBASE_MAP.md`
-- Full text dump: `docs/CODEBASE_DUMP.md`
+- Full text dump: `docs/generated/CODEBASE_DUMP.md` (generated on demand)
 
 ## 2) Product ambition and constraints
 - Primary goal: robust checklist app for students moving to the UK.
@@ -86,12 +86,12 @@ Owner intent: production-grade iOS app now, Android-ready architecture next, zer
 - Do not introduce placeholder-only features into production paths.
 
 ## 9) Expected deliverables from Claude Code
-- `docs/REPORT_AUDIT.md`
-- `docs/REPORT_BACKLOG.csv`
-- `docs/REPORT_EXEC_SUMMARY.md`
+- `docs/reports/REPORT_AUDIT.md`
+- `docs/reports/REPORT_BACKLOG.csv`
+- `docs/reports/REPORT_EXEC_SUMMARY.md`
 - Optional after fixes:
-  - `REPORT_FINAL_CHANGES.md`
-  - `REPORT_TEST_RESULTS.md`
+  - `docs/reports/REPORT_FINAL_CHANGES.md`
+  - `docs/reports/REPORT_TEST_RESULTS.md`
 
 ## 10) Success criteria
 - No build break on iPhone 15 simulator.

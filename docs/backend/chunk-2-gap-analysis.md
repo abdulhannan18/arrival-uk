@@ -5,9 +5,9 @@ Last updated: 2026-02-10
 ## Applied in this chunk (net-new)
 
 - Infra setup guide:
-  - `backend-docs/firebase-setup-complete.md`
+  - `docs/backend/firebase-setup-complete.md`
 - Storage/CDN architecture guide:
-  - `backend-docs/storage-architecture.md`
+  - `docs/backend/storage-architecture.md`
 - Backend function scaffolds:
   - `backend/functions/src/notifications.ts`
   - `backend/functions/src/email.ts`
@@ -33,4 +33,3 @@ Last updated: 2026-02-10
 
 - Reused existing `canImport(...)` guard pattern for optional Firebase modules.
 - Kept backend additions scaffolded and additive; no destructive rewrites of current iOS app logic.
-

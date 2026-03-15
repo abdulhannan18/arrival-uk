@@ -1159,7 +1159,7 @@ The Arrival UK codebase demonstrates solid architectural foundations and excelle
 
 **Next Steps:**
 1. Review this audit with engineering team
-2. Prioritize fixes using REPORT_BACKLOG.csv
+2. Prioritize fixes using `docs/reports/REPORT_BACKLOG.csv`
 3. Begin with IMMEDIATE phase (Week 1) - security fixes and basic CI/CD
 4. Schedule follow-up audit after critical fixes complete
 
@@ -1167,4 +1167,4 @@ The Arrival UK codebase demonstrates solid architectural foundations and excelle
 
 **Audit Completed:** 2026-02-11
 **Report Version:** 1.0
-**Contact:** For questions about this audit, see REPORT_BACKLOG.csv for detailed fix strategies.
+**Contact:** For questions about this audit, see `docs/reports/REPORT_BACKLOG.csv` for detailed fix strategies.

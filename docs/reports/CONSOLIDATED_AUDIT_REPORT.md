@@ -952,10 +952,10 @@ The investment now ($34,000) saves you hundreds of thousands in future costs and
 ---
 
 **Report Generated:** February 11, 2026
-**Files:** `/Users/abdulhannan/Documents/Projects/Arrival UK/docs/`
-- REPORT_AUDIT.md (detailed technical)
-- REPORT_BACKLOG.csv (spreadsheet)
-- REPORT_EXEC_SUMMARY.md (stakeholder summary)
+**Files:** `/Users/abdulhannan/Documents/Projects/Arrival UK/docs/reports/`
+- docs/reports/REPORT_AUDIT.md (detailed technical)
+- docs/reports/REPORT_BACKLOG.csv (spreadsheet)
+- docs/reports/REPORT_EXEC_SUMMARY.md (stakeholder summary)
 - **CONSOLIDATED_AUDIT_REPORT.md (this file - all-in-one)**
 
 **Questions?** Reference issue IDs (e.g., CRIT-001) in your project management tool.

@@ -360,8 +360,8 @@ The Arrival UK codebase is **solid but not launch-ready**. With focused engineer
 5. No test files - Create test infrastructure
 
 ### Key Contacts
-- **Full Technical Audit:** See `REPORT_AUDIT.md`
-- **Detailed Issue Backlog:** See `REPORT_BACKLOG.csv`
+- **Full Technical Audit:** See `docs/reports/REPORT_AUDIT.md`
+- **Detailed Issue Backlog:** See `docs/reports/REPORT_BACKLOG.csv`
 - **Questions:** Reference issue IDs (e.g., CRIT-001, HIGH-005)
 
 ---
@@ -372,4 +372,4 @@ The Arrival UK codebase is **solid but not launch-ready**. With focused engineer
 
 ---
 
-*This executive summary is intended for business stakeholders. For technical implementation details, engineers should reference REPORT_AUDIT.md and REPORT_BACKLOG.csv.*
+*This executive summary is intended for business stakeholders. For technical implementation details, engineers should reference `docs/reports/REPORT_AUDIT.md` and `docs/reports/REPORT_BACKLOG.csv`.*

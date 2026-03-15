@@ -10,7 +10,9 @@ Top-level layout:
 - `arrival ukTests/` tests
 - `ArrivalWidgetExtension/` widget extension
 - `backend/` Firebase backend scaffold
-- `backend-docs/` backend planning docs
-- `docs/` project reports, audits, handoff notes, and architecture docs
+- `docs/` all project documentation
+- `docs/reports/` audits and status reports
+- `docs/backend/` backend planning and architecture notes
+- `docs/generated/` generated dump output when needed
 - `Scripts/` validation and maintenance scripts
 - `AppConfig/` shared config assets

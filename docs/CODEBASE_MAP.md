@@ -2,7 +2,7 @@
 
 - Finder location: `/Users/abdulhannan/Documents/Projects/Arrival UK`
 - Repo root: `.`
-- Full dump generator: `bash Scripts/build_codebase_dump.sh` (writes `docs/CODEBASE_DUMP.md`)
+- Full dump generator: `bash Scripts/build_codebase_dump.sh` (writes `docs/generated/CODEBASE_DUMP.md`)
 - Line count script: `bash Scripts/line_counts.sh`
 
 ## Top-Level
@@ -16,7 +16,6 @@
 - arrival uk.xcodeproj
 - arrival ukTests
 - backend
-- backend-docs
 
 ## Notable Components
 
@@ -43,6 +42,12 @@
 - Storage rules: `backend/storage.rules`
 - CI: `.github/workflows/ci.yml`
 - Release gates: `Scripts/release_gate_check.sh`, `Scripts/strict_smoke.sh`
+
+### Docs Layout
+- General project docs: `docs/*.md`
+- Reports: `docs/reports/*`
+- Backend planning docs: `docs/backend/*`
+- Generated dump output: `docs/generated/CODEBASE_DUMP.md` (not tracked)
 
 ## Full File List
 - To list every tracked file: `git ls-files`
