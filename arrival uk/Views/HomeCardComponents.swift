@@ -21,9 +21,6 @@ struct AppFastButtonStyle: ButtonStyle {
 }
 
 struct CategoryCard: View {
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
     @Binding var category: ChecklistCategory
     let completedTaskCount: Int
     let totalTaskCount: Int
@@ -40,11 +37,7 @@ struct CategoryCard: View {
     let onOpenCategory: () -> Void
 
     @State private var hasAppeared = false
-    @State private var orbHoverLift = false
     @AppStorage(StorageKey.homeHasLaunchedBefore.rawValue) private var hasLaunchedBefore = false
-
-    private let cornerRadius: CGFloat = 22
-    private let cardHeight: CGFloat = 172
 
     private var displayTitle: String {
         HomeLocalization.categoryDisplayTitle(
@@ -54,21 +47,21 @@ struct CategoryCard: View {
     }
 
     private var titleText: String {
-        formattedTitle(from: displayTitle)
+        displayTitle
     }
 
     private var hintText: String {
-        if isSuggestedStart {
-            return "Start here"
-        }
-
         let explicitSubtitle = (category.subtitle ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if !explicitSubtitle.isEmpty {
             return explicitSubtitle
         }
 
-        return category.resolvedDefaultSubtitle
+        return category.resolvedSubtitle
+    }
+
+    private var visualStyle: CategoryVisualStyle {
+        CategoryVisualHierarchy.getVisualStyle(category.visualPriority)
     }
 
     private var progress: Double {
@@ -80,75 +73,118 @@ struct CategoryCard: View {
         Int((progress * 100).rounded())
     }
 
-    private var orbTheme: CategoryOrbTheme {
-        CategoryColorSystem.orbTheme(for: category, index: cardIndex)
+    private var accentColor: Color {
+        Theme.categoryBackground(for: category)
     }
 
-    private var surfaceColor: Color {
-        if colorScheme == .dark {
-            return rgba(22, 22, 35, 0.85)
-        }
-        return rgba(255, 255, 255, 0.78)
+    private var cardTextColor: Color {
+        Theme.categoryText(for: category)
     }
 
-    private var borderColor: Color {
-        if colorScheme == .dark {
-            return rgba(255, 255, 255, 0.08)
-        }
-        return rgba(255, 255, 255, 0.95)
+    private var usesDarkForeground: Bool {
+        Theme.categoryUsesDarkForeground(for: category)
     }
 
-    private var glossStartColor: Color {
-        if colorScheme == .dark {
-            return rgba(255, 255, 255, 0.06)
-        }
-        return rgba(255, 255, 255, 0.24)
+    private var badgeBackgroundColor: Color {
+        Theme.categoryBadgeBackground(for: category)
+    }
+
+    private var badgeTextColor: Color {
+        Theme.categoryBadgeText(for: category)
+    }
+
+    private var iconBackgroundColor: Color {
+        cardTextColor.opacity(isCategoryComplete ? 0.10 : 0.14)
     }
 
     private var titleColor: Color {
-        if colorScheme == .dark {
-            return Color.white
-        }
-        return rgba(10, 10, 18, 1)
+        cardTextColor
     }
 
     private var hintColor: Color {
-        if colorScheme == .dark {
-            return rgba(255, 255, 255, 0.40)
-        }
-        return rgba(10, 10, 18, 0.36)
+        cardTextColor.opacity(0.80)
     }
 
     private var progressLabelColor: Color {
-        if colorScheme == .dark {
-            return rgba(255, 255, 255, 0.28)
-        }
-        return rgba(10, 10, 18, 0.30)
+        cardTextColor.opacity(0.82)
     }
 
     private var progressTrackColor: Color {
-        if colorScheme == .dark {
-            return rgba(255, 255, 255, 0.10)
-        }
-        return rgba(0, 0, 0, 0.09)
+        cardTextColor.opacity(0.18)
     }
 
-    private var shadowColorPrimary: Color {
-        if colorScheme == .dark {
-            return Color.black.opacity(0.50)
-        }
-        return Color.black.opacity(0.09)
+    private var cardBorderColor: Color {
+        usesDarkForeground ? Theme.navy200.opacity(0.55) : Color.white.opacity(0.18)
     }
 
-    private var shadowColorSecondary: Color {
-        if colorScheme == .dark {
-            return Color.black.opacity(0.30)
-        }
-        return Color.black.opacity(0.05)
+    private var actionSurfaceColor: Color {
+        usesDarkForeground ? Theme.cream100.opacity(0.88) : Color.white.opacity(0.14)
     }
 
-    private var prefersReducedMotion: Bool {
-        reduceMotion || PerformanceProfile.prefersConservativeVisuals
+    private var actionBorderColor: Color {
+        usesDarkForeground ? Theme.navy200.opacity(0.70) : Color.white.opacity(0.28)
+    }
+
+    private var actionTextColor: Color {
+        usesDarkForeground ? Theme.navy900 : Theme.inverseText
+    }
+
+    private var shouldShowProgress: Bool {
+        totalTaskCount > 0 && completedTaskCount > 0 && completedTaskCount < totalTaskCount
+    }
+
+    private var metaLine: String {
+        var chunks: [String] = []
+        if totalTaskCount == 0 {
+            chunks.append("No tasks yet")
+        } else if completedTaskCount == totalTaskCount {
+            let taskWord = totalTaskCount == 1 ? "task" : "tasks"
+            chunks.append("Completed \(totalTaskCount) \(taskWord)")
+        } else {
+            let taskWord = totalTaskCount == 1 ? "task" : "tasks"
+            chunks.append("\(completedTaskCount)/\(totalTaskCount) \(taskWord)")
+        }
+
+        if let dueLabel = category.deadlineLabel {
+            chunks.append("Due \(dueLabel)")
+        }
+
+        return chunks.joined(separator: " • ")
+    }
+
+    private var actionLabel: String {
+        if totalTaskCount == 0 { return "Open Category" }
+        if completedTaskCount == 0 { return "Start Category" }
+        if completedTaskCount == totalTaskCount { return "Review Category" }
+        return "Continue Category"
+    }
+
+    private var urgencyLabel: String {
+        switch category.urgencyBand {
+        case .immediate:
+            return "Immediate"
+        case .week1:
+            return "Week 1"
+        case .week2:
+            return "Week 2"
+        case .anytime:
+            return "Anytime"
+        case .completed:
+            return "Done"
+        }
+    }
+
+    private var shadowConfig: (color: Color, radius: CGFloat, y: CGFloat) {
+        switch visualStyle.shadowLevel {
+        case .none:
+            return (.clear, 0, 0)
+        case .subtle:
+            return (Theme.shadowSoft, 2, 1)
+        case .medium:
+            return (Theme.shadowMedium, 8, 4)
+        case .elevated:
+            return (Theme.shadowCritical, 20, 12)
+        }
     }
 
     var body: some View {
@@ -156,122 +192,148 @@ struct CategoryCard: View {
             HapticService.shared.medium()
             onOpenCategory()
         } label: {
-            ZStack {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(surfaceColor)
+            VStack(alignment: .leading, spacing: max(10, visualStyle.cardPadding * 0.34)) {
+                HStack(spacing: Theme.spaceS) {
+                    Text(urgencyLabel.uppercased())
+                        .font(.system(size: 10, weight: .semibold))
+                        .tracking(0.6)
+                        .foregroundStyle(badgeTextColor)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(badgeBackgroundColor)
+                        )
 
-                Circle()
-                    .fill(orbTheme.orbGradient)
-                    .frame(width: 220, height: 220)
-                    .offset(x: orbHoverLift ? 44 : 50, y: orbHoverLift ? -55 : -50)
-                    .scaleEffect(orbHoverLift ? 1.08 : 1.0)
-                    .matchedGeometryEffect(id: "category-hero-shape-\(heroID)", in: heroNamespace)
-                    .allowsHitTesting(false)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    Spacer()
 
-                CategoryCardGlossOverlay(
-                    cornerRadius: cornerRadius,
-                    startColor: glossStartColor
-                )
-                .allowsHitTesting(false)
+                    if isCategoryComplete {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(cardTextColor)
+                            .accessibilityHidden(true)
+                    }
+                }
 
-                CategoryCardEdgeHighlight()
-                    .allowsHitTesting(false)
+                HStack(spacing: Theme.spaceS) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(iconBackgroundColor)
+                            .matchedGeometryEffect(id: "category-hero-shape-\(heroID)", in: heroNamespace)
 
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(hintText)
-                        .font(ArrivalTypography.figtree(size: 11, weight: .medium))
-                        .foregroundStyle(hintColor)
-                        .lineLimit(1)
-                        .matchedGeometryEffect(id: "category-subtitle-\(heroID)", in: heroNamespace)
-                        .padding(.top, 18)
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(cardTextColor.opacity(0.16), lineWidth: 1)
 
-                    Spacer(minLength: 0)
+                        Image(systemName: category.icon)
+                            .font(.system(size: max(20, visualStyle.iconSize * 0.36), weight: .semibold))
+                            .foregroundStyle(cardTextColor)
+                    }
+                    .frame(width: visualStyle.iconSize, height: visualStyle.iconSize)
+                    .matchedGeometryEffect(id: "category-icon-\(heroID)", in: heroNamespace)
 
-                    Text(titleText)
-                        .font(.title2.weight(.bold))
-                        .foregroundStyle(titleColor)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.70)
-                        .padding(.bottom, 12)
-                        .matchedGeometryEffect(id: "category-title-\(heroID)", in: heroNamespace)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(titleText)
+                            .font(.system(size: visualStyle.titleFontSize, weight: visualStyle.titleWeight))
+                            .tracking(visualStyle.titleTracking)
+                            .foregroundStyle(titleColor)
+                            .lineLimit(1)
+                            .matchedGeometryEffect(id: "category-title-\(heroID)", in: heroNamespace)
 
+                        if !hintText.isEmpty {
+                            Text(hintText)
+                                .font(.system(size: visualStyle.subtitleFontSize, weight: visualStyle.subtitleWeight))
+                                .foregroundStyle(hintColor.opacity(visualStyle.subtitleOpacity / 0.80))
+                                .lineLimit(1)
+                                .matchedGeometryEffect(id: "category-subtitle-\(heroID)", in: heroNamespace)
+                        }
+                    }
+
+                    Spacer()
+                }
+
+                Text(metaLine)
+                    .font(.system(size: visualStyle.metaFontSize, weight: .semibold))
+                    .foregroundStyle(progressLabelColor)
+                    .lineLimit(1)
+
+                if shouldShowProgress {
                     HStack(alignment: .center, spacing: 10) {
                         CategoryCardProgressBar(
                             progress: progress,
-                            fillColor: orbTheme.fillAccent,
+                            fillColor: cardTextColor,
                             trackColor: progressTrackColor
                         )
-                        .frame(height: 1.5)
+                        .frame(height: 7)
+                        .clipShape(Capsule(style: .continuous))
 
                         Text("\(progressPercent)%")
-                            .font(ArrivalTypography.figtree(size: 9.5, weight: .semibold))
+                            .font(.system(size: 11, weight: .bold))
                             .foregroundStyle(progressLabelColor)
                             .lineLimit(1)
                     }
-                    .padding(.bottom, 16)
                 }
-                .padding(.horizontal, 20)
-                .padding(.trailing, 78)
-                .offset(x: motionTilt.width, y: motionTilt.height)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .zIndex(4)
 
-                Color.clear
-                    .frame(width: 1, height: 1)
-                    .matchedGeometryEffect(id: "category-icon-\(heroID)", in: heroNamespace)
-                    .accessibilityHidden(true)
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: cardHeight)
-            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .stroke(borderColor, lineWidth: 1)
-            )
-            .overlay(alignment: .bottomTrailing) {
-                if isCategoryComplete {
-                    CategoryDoneRing()
-                        .padding(.trailing, 14)
-                        .padding(.bottom, 14)
-                        .accessibilityHidden(true)
+                HStack(spacing: 8) {
+                    Text(actionLabel)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(actionTextColor)
+
+                    Spacer()
+
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(actionTextColor)
                 }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(actionSurfaceColor)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(actionBorderColor, lineWidth: 1)
+                )
             }
-            .shadow(color: suppressShadow ? .clear : shadowColorPrimary, radius: 16, x: 0, y: 10)
-            .shadow(color: suppressShadow ? .clear : shadowColorSecondary, radius: 8, x: 0, y: 2)
-            .opacity(isCategoryComplete ? 0.62 : 1)
-            .scaleEffect(x: hasLaunchedBefore || hasAppeared ? 1.0 : 0.85, y: 1.0, anchor: .center)
-            .rotation3DEffect(
-                .degrees(tiltDegrees),
-                axis: (x: 1, y: 0, z: 0),
-                anchor: .top,
-                perspective: 0.5
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(minHeight: visualStyle.minHeight, alignment: .topLeading)
+            .padding(visualStyle.cardPadding)
+            .background(
+                RoundedRectangle(cornerRadius: visualStyle.cornerRadius, style: .continuous)
+                    .fill(accentColor)
             )
+            .overlay(
+                RoundedRectangle(cornerRadius: visualStyle.cornerRadius, style: .continuous)
+                    .stroke(isPulsing ? Color.white.opacity(0.32) : cardBorderColor, lineWidth: 1)
+            )
+            .shadow(
+                color: suppressShadow ? .clear : (isPulsing ? accentColor.opacity(0.28) : shadowConfig.color.opacity(0.75)),
+                radius: isPulsing ? max(18, shadowConfig.radius) : shadowConfig.radius,
+                x: 0,
+                y: isPulsing ? max(10, shadowConfig.y) : shadowConfig.y
+            )
+            .opacity(isCategoryComplete ? 0.84 : 1)
+            .scaleEffect(x: hasLaunchedBefore || hasAppeared ? 1.0 : 0.96, y: 1.0, anchor: .center)
             .animation(
-                .spring(response: 0.5, dampingFraction: 0.75).delay(Double(cardIndex) * 0.06),
+                .spring(response: 0.5, dampingFraction: 0.78).delay(Double(cardIndex) * 0.05),
                 value: hasAppeared
             )
             .matchedGeometryEffect(id: "category-card-\(heroID)", in: heroNamespace)
-            .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .drawingGroup()
+            .contentShape(RoundedRectangle(cornerRadius: visualStyle.cornerRadius, style: .continuous))
         }
         .buttonStyle(CardButtonStyle())
         .opacity(isHeroSourceHidden ? 0 : 1)
         .onAppear {
             HapticService.shared.prepare()
 
+            guard !hasAppeared else { return }
             DispatchQueue.main.asyncAfter(
                 deadline: .now() + Double(cardIndex) * ArrivalTokens.Animation.cardStagger
             ) {
-                withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.82)) {
                     hasAppeared = true
                 }
             }
-
-            updateOrbHoverState(for: isPulsing)
-        }
-        .onChange(of: isPulsing) { _, nextValue in
-            updateOrbHoverState(for: nextValue)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
@@ -282,22 +344,6 @@ struct CategoryCard: View {
             )
         )
         .accessibilityHint(isSuggestedStart ? HomeLocalization.startHereHint : HomeLocalization.categoryCardHint)
-    }
-
-    private func updateOrbHoverState(for shouldHover: Bool) {
-        if !shouldHover {
-            withAnimation(.easeOut(duration: prefersReducedMotion ? 0.12 : 0.22)) {
-                orbHoverLift = false
-            }
-            return
-        }
-
-        withAnimation(
-            .timingCurve(0.16, 1, 0.3, 1, duration: prefersReducedMotion ? 0.14 : 0.55)
-                .repeatForever(autoreverses: true)
-        ) {
-            orbHoverLift = true
-        }
     }
 
     private func rgba(_ red: Double, _ green: Double, _ blue: Double, _ opacity: Double) -> Color {

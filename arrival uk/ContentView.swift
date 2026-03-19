@@ -631,179 +631,95 @@ struct ContentView: View {
 
             ScrollView {
                 LazyVStack(spacing: homeStackSpacing) {
-                CopilotHeaderView(
-                    viewModel: copilotHeaderViewModel,
-                    onSearchTap: {
-                        presentSheet(.search)
-                    },
-                    onProfileTap: {
-                        presentSheet(.profileSetup)
-                    },
-                    isSettledMode: isSettledMode,
-                    onUtilityTap: {
-                        if isSettledMode {
-                            presentSheet(.scanQR)
-                        } else {
-                            presentSheet(.addTask(defaultCategoryID: nil))
-                        }
-                    },
-                    topSafeAreaInset: safeAreaTopInset,
-                    collaborationPresenceText: collaborationEngine.presenceBadgeText
-                )
-                .id(HomeScrollAnchor.topSection)
-                .staggeredEntry(index: 0, isActive: true, prefersReducedMotion: prefersReducedMotion)
-
-                HorizonPrioritySection(
-                    isSettledMode: isSettledMode,
-                    isLowPowerModeEnabled: lowPowerModeManager.isLowPowerModeEnabled,
-                    onOpenTask: { task in
-                        _ = openTaskGuide(taskID: task.taskID, preferredCategoryID: task.categoryID)
-                    },
-                    onCompleteHeroTask: { task in
-                        completePriorityTask(task)
-                    },
-                    onCompleteMaintenanceTask: { task in
-                        completePriorityTask(task)
-                    },
-                    onOpenDiscoveryLink: { url in
-                        presentSheet(.web(url))
-                    },
-                    onLaunchMarketplaceService: { descriptor, entryPoint in
-                        Task { @MainActor in
-                            await launchMarketplaceService(descriptor, entryPoint: entryPoint)
-                        }
-                    }
-                )
-                .staggeredEntry(index: 1, isActive: true, prefersReducedMotion: prefersReducedMotion)
-
-                SecureDocumentWalletSection()
-                    .id(HomeScrollAnchor.walletSection)
-                    .staggeredEntry(index: 2, isActive: true, prefersReducedMotion: prefersReducedMotion)
-
-                if !availableTimelineFilters.isEmpty {
-                    HomeTimelineFilterBar(
-                        filters: timelineFilterOptions,
-                        selectedFilterID: Self
-                            .normalizedTimelineFilter(
-                                selectedTimelineFilter,
-                                availableFilters: availableTimelineFilters
-                            )
-                            .rawValue,
-                        onSelectFilter: { selectedOption in
-                            guard let nextFilter = Self.timelineFilterSelection(
-                                for: selectedOption.id,
-                                availableFilters: availableTimelineFilters
-                            ) else {
-                                return
-                            }
-                            selectTimelineFilter(nextFilter)
-                        }
-                    )
-                    .staggeredEntry(index: 3, isActive: true, prefersReducedMotion: prefersReducedMotion)
-                }
-
-                if let todayTaskContext {
-                    TodayCard(
-                        task: todayTaskContext.task,
-                        category: todayTaskContext.category,
-                        onTap: {
-                            openTodayTask(todayTaskContext)
-                        }
-                    )
-                    .staggeredEntry(index: 4, isActive: true, prefersReducedMotion: prefersReducedMotion)
-                }
-
-                if shouldShowSponsoredSlot, let sponsoredSlotURL {
-                    HomeSponsoredSlotView(
-                        onImpression: {
-                            trackSponsoredSlotImpressionIfNeeded()
+                    CopilotHeaderView(
+                        viewModel: copilotHeaderViewModel,
+                        onSearchTap: {
+                            presentSheet(.search)
                         },
-                        onTap: {
-                            registerAdEvent(.sponsoredSlotTapped)
-                            trackHomeAnalytics(
-                                event: "home_sponsored_slot_tapped",
-                                properties: [
-                                    "placement": "home_header",
-                                    "destinationHost": sponsoredSlotURL.host ?? "unknown"
-                                ]
-                            )
-                            LaunchMetrics.mark(event: "home_sponsored_slot_tapped")
-                            registerAdEvent(.resourceOpened)
-                            presentSheet(.web(sponsoredSlotURL))
-                        }
+                        onProfileTap: {
+                            presentSheet(.profileSetup)
+                        },
+                        isSettledMode: isSettledMode,
+                        onUtilityTap: {
+                            if isSettledMode {
+                                presentSheet(.scanQR)
+                            } else {
+                                presentSheet(.addTask(defaultCategoryID: nil))
+                            }
+                        },
+                        topSafeAreaInset: safeAreaTopInset,
+                        collaborationPresenceText: collaborationEngine.presenceBadgeText
                     )
-                    .id("home-sponsored-slot")
-                    .staggeredEntry(index: todayTaskContext == nil ? 4 : 5, isActive: true, prefersReducedMotion: prefersReducedMotion)
-                }
+                    .id(HomeScrollAnchor.topSection)
+                    .staggeredEntry(index: 0, isActive: true, prefersReducedMotion: prefersReducedMotion)
 
-                if filteredCategorySections.isEmpty {
-                    HomeEmptyStateView()
-                        .padding(.top, Theme.spaceL)
-                } else {
-                    ForEach(Array(filteredCategorySections.enumerated()), id: \.element.id) { sectionIndex, section in
-                        let isCompletedSection = section.timeline == .completed
-                        let isCollapsedCompletedSection = isCompletedSection && isCompletedSectionCollapsed
-                        let onToggleCompleted: (() -> Void)? = isCompletedSection ? { toggleCompletedSection() } : nil
-                        let progressCounts = taskProgressCounts(for: section)
-                        let progressLabel = HomeLocalization.taskProgressCompact(
-                            completedCount: progressCounts.completed,
-                            totalCount: progressCounts.total
+                    if let todayTaskContext {
+                        TodayCard(
+                            task: todayTaskContext.task,
+                            category: todayTaskContext.category,
+                            onTap: {
+                                openTodayTask(todayTaskContext)
+                            }
                         )
+                        .staggeredEntry(index: 1, isActive: true, prefersReducedMotion: prefersReducedMotion)
+                    }
 
-                        VStack(alignment: .leading, spacing: sectionSpacing) {
-                            HomeTimelineHeader(
-                                title: section.timeline.title,
-                                subtitle: section.timeline.subtitle,
-                                progressLabel: progressLabel,
-                                isCollapsible: isCompletedSection,
-                                isCollapsed: isCollapsedCompletedSection,
-                                onToggleCollapse: onToggleCompleted
-                            )
+                    if visibleCategoryIndices.isEmpty {
+                        HomeEmptyStateView()
+                            .padding(.top, Theme.spaceL)
+                    } else {
+                        VStack(alignment: .leading, spacing: Theme.spaceL) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Your checklist")
+                                    .font(ArrivalTypography.figtree(size: 18, weight: .bold))
+                                    .foregroundStyle(Theme.primaryText)
 
-                            if !isCollapsedCompletedSection {
-                                LazyVGrid(columns: sectionGridColumns, alignment: .leading, spacing: gridSpacing) {
-                                    ForEach(Array(section.indices.enumerated()), id: \.element) { position, index in
-                                        if store.categories.indices.contains(index) {
-                                            let metrics = cardMetrics(for: index)
-                                            CategoryCard(
-                                                category: $store.categories[index],
-                                                completedTaskCount: metrics.completedCount,
-                                                totalTaskCount: metrics.totalCount,
-                                                isCategoryComplete: metrics.isComplete,
-                                                isPulsing: todayTaskContext?.category.id == store.categories[index].id,
-                                                heroNamespace: categoryHeroNamespace,
-                                                heroID: heroID(for: index),
-                                                isHeroSourceHidden: selectedCategoryIndex == index,
-                                                suppressShadow: prefersConservativeVisuals && isScrollActive,
-                                                isSuggestedStart: shouldHighlightSuggestedStart(for: index),
-                                                cardIndex: index,
-                                                tiltDegrees: tiltDegrees(for: store.categories[index].id),
-                                                motionTilt: prefersReducedMotion ? .zero : motionManager.tilt,
-                                                onOpenCategory: {
-                                                    openCategory(at: index)
-                                                }
-                                            )
-                                            .background(
-                                                GeometryReader { proxy in
-                                                    Color.clear.preference(
-                                                        key: HomeCardMidYPreferenceKey.self,
-                                                        value: [store.categories[index].id: proxy.frame(in: .global).midY]
-                                                    )
-                                                }
-                                            )
-                                            .staggeredEntry(
-                                                index: sectionIndex + position + staggeredContentBaseIndex,
-                                                isActive: true,
-                                                prefersReducedMotion: prefersReducedMotion
-                                            )
-                                        }
+                                Text(timelinePrimaryMetric)
+                                    .font(ArrivalTypography.figtree(size: 13, weight: .medium))
+                                    .foregroundStyle(Theme.secondaryText)
+                            }
+
+                            LazyVGrid(columns: sectionGridColumns, alignment: .leading, spacing: gridSpacing) {
+                                ForEach(Array(visibleCategoryIndices.enumerated()), id: \.element) { position, index in
+                                    if store.categories.indices.contains(index) {
+                                        let metrics = cardMetrics(for: index)
+                                        CategoryCard(
+                                            category: $store.categories[index],
+                                            completedTaskCount: metrics.completedCount,
+                                            totalTaskCount: metrics.totalCount,
+                                            isCategoryComplete: metrics.isComplete,
+                                            isPulsing: todayTaskContext?.category.id == store.categories[index].id,
+                                            heroNamespace: categoryHeroNamespace,
+                                            heroID: heroID(for: index),
+                                            isHeroSourceHidden: selectedCategoryIndex == index,
+                                            suppressShadow: prefersConservativeVisuals && isScrollActive,
+                                            isSuggestedStart: shouldHighlightSuggestedStart(for: index),
+                                            cardIndex: index,
+                                            tiltDegrees: tiltDegrees(for: store.categories[index].id),
+                                            motionTilt: prefersReducedMotion ? .zero : motionManager.tilt,
+                                            onOpenCategory: {
+                                                openCategory(at: index)
+                                            }
+                                        )
+                                        .background(
+                                            GeometryReader { proxy in
+                                                Color.clear.preference(
+                                                    key: HomeCardMidYPreferenceKey.self,
+                                                    value: [store.categories[index].id: proxy.frame(in: .global).midY]
+                                                )
+                                            }
+                                        )
+                                        .staggeredEntry(
+                                            index: position + 2,
+                                            isActive: true,
+                                            prefersReducedMotion: prefersReducedMotion
+                                        )
                                     }
                                 }
                             }
                         }
-                        .padding(.top, sectionIndex == 0 ? Theme.spaceXS : Theme.spaceL)
+                        .padding(.top, Theme.spaceXS)
                     }
-                }
                 }
                 .padding(.horizontal, contentHorizontalPadding)
                 .padding(.top, 16)
