@@ -1,10 +1,11 @@
 import * as admin from "firebase-admin";
 import * as functions from "firebase-functions";
-import { createHmac, timingSafeEqual } from "crypto";
+import { createHash, createHmac, timingSafeEqual } from "crypto";
 import { escapeHtml, sanitizeHTTPSURL } from "./utils/sanitization";
 import { isPrivilegedCaller } from "./utils/privileged";
 import { enforceRateLimit } from "./utils/rateLimit";
 import { assertCallableAppCheck } from "./utils/appCheck";
+import { Collections } from "./constants";
 
 if (admin.apps.length === 0) {
   admin.initializeApp();
@@ -26,6 +27,7 @@ const ALLOWED_CUSTOM_EMAIL_TEMPLATES = new Set([
 ]);
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const FIREBASE_UID_PATTERN = /^[A-Za-z0-9:_-]{6,128}$/;
+const WEEKLY_DIGEST_EMAIL_TYPE = "weekly_digest";
 let didWarnInvalidFromEmail = false;
 let didWarnInvalidAppURL = false;
 let didWarnMissingUnsubscribeSecret = false;
@@ -146,9 +148,14 @@ function base64Url(buffer: Buffer): string {
     .replace(/=+$/g, "");
 }
 
-function signUnsubscribePayload(secret: string, userId: string, issuedAtMs: number): string {
+function signUnsubscribePayload(
+  secret: string,
+  userId: string,
+  emailType: string,
+  issuedAtMs: number
+): string {
   const digest = createHmac("sha256", secret)
-    .update(`${userId}.${issuedAtMs}`)
+    .update(`${userId}.${emailType}.${issuedAtMs}`)
     .digest();
   return base64Url(digest);
 }
@@ -168,9 +175,15 @@ function buildWeeklyDigestUnsubscribeURL(userId: string, nowMs = Date.now()): st
   if (!FIREBASE_UID_PATTERN.test(userId)) return null;
 
   const issuedAtMs = Math.floor(nowMs);
-  const signature = signUnsubscribePayload(secret, userId, issuedAtMs);
+  const signature = signUnsubscribePayload(
+    secret,
+    userId,
+    WEEKLY_DIGEST_EMAIL_TYPE,
+    issuedAtMs
+  );
   const url = new URL(unsubscribeBaseURL());
   url.searchParams.set("uid", userId);
+  url.searchParams.set("type", WEEKLY_DIGEST_EMAIL_TYPE);
   url.searchParams.set("ts", String(issuedAtMs));
   url.searchParams.set("sig", signature);
   return url.toString();
@@ -178,6 +191,7 @@ function buildWeeklyDigestUnsubscribeURL(userId: string, nowMs = Date.now()): st
 
 function isValidUnsubscribeRequest(
   userId: string,
+  emailType: string,
   issuedAtRaw: string,
   signature: string,
   nowMs = Date.now(),
@@ -185,6 +199,7 @@ function isValidUnsubscribeRequest(
 ): boolean {
   if (!secret) return false;
   if (!FIREBASE_UID_PATTERN.test(userId)) return false;
+  if (emailType !== WEEKLY_DIGEST_EMAIL_TYPE) return false;
   if (!signature || signature.length < 24 || signature.length > 128) return false;
 
   const issuedAtMs = Number(issuedAtRaw);
@@ -193,8 +208,124 @@ function isValidUnsubscribeRequest(
   const ageMs = nowMs - issuedAtMs;
   if (ageMs < 0 || ageMs > MAX_UNSUBSCRIBE_LINK_AGE_MS) return false;
 
-  const expectedSignature = signUnsubscribePayload(secret, userId, issuedAtMs);
+  const expectedSignature = signUnsubscribePayload(secret, userId, emailType, issuedAtMs);
   return safeCompare(signature, expectedSignature);
+}
+
+function requestParameter(
+  request: functions.https.Request,
+  key: string
+): string {
+  const bodyValue = request.body && typeof request.body === "object" && !Array.isArray(request.body)
+    ? safeString((request.body as Record<string, unknown>)[key])
+    : "";
+  if (bodyValue) return bodyValue;
+  return safeString(request.query[key]);
+}
+
+function renderWeeklyDigestUnsubscribeConfirmation(
+  userId: string,
+  emailType: string,
+  issuedAt: string,
+  signature: string
+): string {
+  return `
+    <html>
+      <body style="font-family:-apple-system,Arial,sans-serif;padding:24px;color:#111827;">
+        <h2>Confirm unsubscribe</h2>
+        <p>This link is for weekly digest emails only. Confirm below if you want to stop receiving them.</p>
+        <form method="POST">
+          <input type="hidden" name="uid" value="${escapeHtml(userId)}" />
+          <input type="hidden" name="type" value="${escapeHtml(emailType)}" />
+          <input type="hidden" name="ts" value="${escapeHtml(issuedAt)}" />
+          <input type="hidden" name="sig" value="${escapeHtml(signature)}" />
+          <button type="submit" style="padding:10px 16px;border-radius:8px;background:#111827;color:#fff;border:none;">Unsubscribe</button>
+        </form>
+      </body>
+    </html>
+  `.trim();
+}
+
+function renderWeeklyDigestUnsubscribeSuccess(): string {
+  return `
+    <html>
+      <body style="font-family:-apple-system,Arial,sans-serif;padding:24px;color:#111827;">
+        <h2>Unsubscribed</h2>
+        <p>You will no longer receive weekly digest emails from Arrival UK.</p>
+        <p>If this was a mistake, you can re-enable digest emails in app settings.</p>
+      </body>
+    </html>
+  `.trim();
+}
+
+type DigestSendStatus = "reserved" | "sent" | "failed";
+
+function weeklyDigestWindowKey(now = new Date()): string {
+  const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const day = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  const week = Math.ceil((((date.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  return `${date.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+
+function weeklyDigestIdempotencyKey(userId: string, windowKey: string): string {
+  return createHash("sha256")
+    .update(`${WEEKLY_DIGEST_EMAIL_TYPE}:${userId}:${windowKey}`)
+    .digest("hex");
+}
+
+function digestReservationAction(existingStatus: DigestSendStatus | null | undefined): "reserve" | "skip" {
+  if (!existingStatus || existingStatus === "failed") {
+    return "reserve";
+  }
+  return "skip";
+}
+
+function digestSendCollectionRef(): FirebaseFirestore.CollectionReference {
+  return db.collection(Collections.ops.root)
+    .doc(Collections.ops.emailDigestSends)
+    .collection(Collections.ops.items);
+}
+
+async function reserveWeeklyDigestSend(
+  userId: string,
+  windowKey: string
+): Promise<{ shouldSend: boolean; idempotencyKey: string }> {
+  const idempotencyKey = weeklyDigestIdempotencyKey(userId, windowKey);
+  const reservationRef = digestSendCollectionRef().doc(idempotencyKey);
+
+  return db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(reservationRef);
+    const existingStatus = safeString(snapshot.data()?.status) as DigestSendStatus | "";
+    const action = digestReservationAction(existingStatus || null);
+    if (action === "skip") {
+      return { shouldSend: false, idempotencyKey };
+    }
+
+    transaction.set(reservationRef, {
+      userId,
+      emailType: WEEKLY_DIGEST_EMAIL_TYPE,
+      windowKey,
+      status: "reserved",
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      lastError: admin.firestore.FieldValue.delete(),
+    }, { merge: true });
+
+    return { shouldSend: true, idempotencyKey };
+  });
+}
+
+async function markWeeklyDigestSendResult(
+  idempotencyKey: string,
+  status: Extract<DigestSendStatus, "sent" | "failed">,
+  errorMessage?: string
+): Promise<void> {
+  await digestSendCollectionRef().doc(idempotencyKey).set({
+    status,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    lastError: errorMessage ? errorMessage.slice(0, 240) : admin.firestore.FieldValue.delete(),
+  }, { merge: true });
 }
 
 function extractEmailDomain(email: string): string | null {
@@ -359,6 +490,7 @@ export const sendWeeklyDigestEmail = emailRuntime.pubsub
   .schedule("every monday 09:00")
   .timeZone("Europe/London")
   .onRun(async () => {
+    const windowKey = weeklyDigestWindowKey(new Date());
     const maxConcurrentSends = 12;
     const pageSize = 300;
     let lastDoc: FirebaseFirestore.QueryDocumentSnapshot | undefined;
@@ -400,6 +532,10 @@ export const sendWeeklyDigestEmail = emailRuntime.pubsub
         const safeAppURL = sanitizeURL(appURL());
         const unsubscribeURL = buildWeeklyDigestUnsubscribeURL(userDoc.id);
         const safeUnsubscribeURL = sanitizeURL(unsubscribeURL ?? `${appURL()}/settings/notifications`);
+        const reservation = await reserveWeeklyDigestSend(userDoc.id, windowKey);
+        if (!reservation.shouldSend) {
+          continue;
+        }
         const html = `
         <div style="font-family:-apple-system,Arial,sans-serif;line-height:1.5;color:#111827;">
           <h2>Your Weekly Progress</h2>
@@ -426,11 +562,14 @@ export const sendWeeklyDigestEmail = emailRuntime.pubsub
                   }
                 : undefined,
             });
+            await markWeeklyDigestSendResult(reservation.idempotencyKey, "sent");
           } catch (error) {
+            const message = error instanceof Error ? error.message : "unknown_error";
+            await markWeeklyDigestSendResult(reservation.idempotencyKey, "failed", message);
             functions.logger.error("Failed to send weekly digest", {
               userId: userDoc.id,
               toDomain: extractEmailDomain(to),
-              error: error instanceof Error ? error.message : "unknown_error",
+              error: message,
             });
           }
         })());
@@ -570,12 +709,21 @@ export const unsubscribeWeeklyDigest = emailRuntime.https.onRequest(async (reque
     return;
   }
 
-  const userId = safeString(request.query.uid);
-  const issuedAt = safeString(request.query.ts);
-  const signature = safeString(request.query.sig);
+  const userId = requestParameter(request, "uid");
+  const emailType = requestParameter(request, "type");
+  const issuedAt = requestParameter(request, "ts");
+  const signature = requestParameter(request, "sig");
 
-  if (!isValidUnsubscribeRequest(userId, issuedAt, signature)) {
+  if (!isValidUnsubscribeRequest(userId, emailType, issuedAt, signature)) {
     response.status(400).send("Invalid or expired unsubscribe link.");
+    return;
+  }
+
+  if (request.method === "GET") {
+    response
+      .status(200)
+      .setHeader("Content-Type", "text/html; charset=utf-8")
+      .send(renderWeeklyDigestUnsubscribeConfirmation(userId, emailType, issuedAt, signature));
     return;
   }
 
@@ -594,15 +742,7 @@ export const unsubscribeWeeklyDigest = emailRuntime.https.onRequest(async (reque
     response
       .status(200)
       .setHeader("Content-Type", "text/html; charset=utf-8")
-      .send(`
-        <html>
-          <body style="font-family:-apple-system,Arial,sans-serif;padding:24px;color:#111827;">
-            <h2>Unsubscribed</h2>
-            <p>You will no longer receive weekly digest emails from Arrival UK.</p>
-            <p>If this was a mistake, you can re-enable digest emails in app settings.</p>
-          </body>
-        </html>
-      `.trim());
+      .send(renderWeeklyDigestUnsubscribeSuccess());
   } catch (error) {
     functions.logger.error("Failed to unsubscribe weekly digest", {
       userId,
@@ -620,4 +760,9 @@ export const __private__ = {
   buildWeeklyDigestUnsubscribeURL,
   isValidUnsubscribeRequest,
   signUnsubscribePayload,
+  renderWeeklyDigestUnsubscribeConfirmation,
+  weeklyDigestWindowKey,
+  weeklyDigestIdempotencyKey,
+  digestReservationAction,
+  WEEKLY_DIGEST_EMAIL_TYPE,
 };

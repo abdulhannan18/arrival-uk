@@ -19,6 +19,8 @@
       "**/node_modules/**"
     ],
     "rewrites": [
+      { "source": "/v1/tasks/sync", "function": "taskSync" },
+      { "source": "/v1/marketplace/payments/confirm", "function": "marketplacePaymentConfirm" },
       { "source": "/privacy", "destination": "/privacy.html" },
       { "source": "/terms", "destination": "/terms.html" },
       { "source": "/support", "destination": "/support.html" },

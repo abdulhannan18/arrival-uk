@@ -48,6 +48,13 @@ type ContentTask = {
   isPublished?: boolean;
 };
 
+type MessagingResponseLike = {
+  success: boolean;
+  error?: {
+    code?: unknown;
+  } | null;
+};
+
 function parseTimingToDays(timing?: string): number {
   if (!timing) return 0;
   const normalized = timing.trim().toLowerCase().replace(/[\s-]+/g, "_");
@@ -111,6 +118,24 @@ function queueDocumentID(userId: string, taskId: string, sendAt: Date): string {
   return `${userId}_${taskId}_${dayKey}`.replace(/[^A-Za-z0-9_-]/g, "_");
 }
 
+function buildNotificationAttemptLog(
+  notificationId: string,
+  userId: string,
+  type: string,
+  result: "success" | "failure" | "skipped",
+  errorMessage?: string
+): Record<string, unknown> {
+  return {
+    notificationId,
+    userId,
+    type,
+    channel: "push",
+    timestamp: new Date().toISOString(),
+    result,
+    error: errorMessage ? truncateErrorMessage(errorMessage) : undefined,
+  };
+}
+
 function isAlreadyExistsError(error: unknown): boolean {
   const code = (error as { code?: string | number })?.code;
   return code === 6 || code === "6" || code === "already-exists";
@@ -146,6 +171,21 @@ function extractMessagingErrorCode(error: unknown): string | null {
 function isPermanentMessagingErrorCode(code: string | null): boolean {
   if (!code) return false;
   return PERMANENT_MESSAGING_ERROR_CODES.has(code);
+}
+
+function invalidTokensFromMessagingResponses(
+  tokens: string[],
+  responses: MessagingResponseLike[]
+): string[] {
+  const invalidTokens: string[] = [];
+  responses.forEach((result, index) => {
+    if (result.success) return;
+    const code = extractMessagingErrorCode(result.error);
+    if (isPermanentMessagingErrorCode(code) && tokens[index]) {
+      invalidTokens.push(tokens[index]);
+    }
+  });
+  return invalidTokens;
 }
 
 function chunkValues(values: string[], size: number): string[][] {
@@ -336,6 +376,13 @@ async function processQueuedNotification(
     const tokens = await tokensForUser(notif.userId);
 
     if (tokens.length === 0) {
+      functions.logger.info("notification_delivery", buildNotificationAttemptLog(
+        notifDoc.id,
+        notif.userId,
+        notif.type,
+        "skipped",
+        "missing_fcm_token"
+      ));
       await notifDoc.ref.update({
         sent: true,
         sentAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -363,15 +410,12 @@ async function processQueuedNotification(
     });
 
     const failedCodes: string[] = [];
-    const invalidTokens: string[] = [];
+    const invalidTokens = invalidTokensFromMessagingResponses(tokens, response.responses);
     response.responses.forEach((result, index) => {
       if (result.success) return;
 
       const code = extractMessagingErrorCode(result.error);
       if (code) failedCodes.push(code);
-      if (isPermanentMessagingErrorCode(code)) {
-        invalidTokens.push(tokens[index]);
-      }
     });
 
     if (invalidTokens.length > 0) {
@@ -380,6 +424,12 @@ async function processQueuedNotification(
     }
 
     if (response.successCount > 0) {
+      functions.logger.info("notification_delivery", buildNotificationAttemptLog(
+        notifDoc.id,
+        notif.userId,
+        notif.type,
+        "success"
+      ));
       await notifDoc.ref.update({
         sent: true,
         sentAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -393,6 +443,13 @@ async function processQueuedNotification(
     const allPermanentFailures = failedCodes.length > 0
       && failedCodes.every((code) => isPermanentMessagingErrorCode(code));
     if (allPermanentFailures) {
+      functions.logger.warn("notification_delivery", buildNotificationAttemptLog(
+        notifDoc.id,
+        notif.userId,
+        notif.type,
+        "failure",
+        "all_device_tokens_invalid"
+      ));
       await notifDoc.ref.update({
         sent: true,
         sentAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -408,6 +465,13 @@ async function processQueuedNotification(
       retryCount + 1,
       failedCodes[0] ?? "notification_send_failed"
     );
+    functions.logger.warn("notification_delivery", buildNotificationAttemptLog(
+      notifDoc.id,
+      notif.userId,
+      notif.type,
+      "failure",
+      failedCodes[0] ?? "notification_send_failed"
+    ));
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown_error";
     const code = extractMessagingErrorCode(error);
@@ -424,6 +488,13 @@ async function processQueuedNotification(
     }
 
     await scheduleNotificationRetry(notifDoc.ref, retryCount + 1, message);
+    functions.logger.warn("notification_delivery", buildNotificationAttemptLog(
+      notifDoc.id,
+      notif.userId,
+      notif.type,
+      "failure",
+      message
+    ));
     functions.logger.error("Failed to send queued notification", {
       notificationId: notifDoc.id,
       message: truncateErrorMessage(message),
@@ -572,7 +643,7 @@ export const scheduleTaskNotifications = functions.pubsub
   });
 
 export const sendQueuedNotifications = functions.pubsub
-  .schedule("every 1 hours")
+  .schedule("every 5 minutes")
   .onRun(async () => {
     const now = admin.firestore.Timestamp.now();
     const pending = await db
@@ -581,6 +652,7 @@ export const sendQueuedNotifications = functions.pubsub
       .collection(Collections.notifications.pending)
       .where("sent", "==", false)
       .where("scheduledFor", "<=", now)
+      .orderBy("scheduledFor", "asc")
       .limit(100)
       .get();
 
@@ -733,4 +805,7 @@ export const __private__ = {
   normalizedDeviceID,
   retryDelayMsForAttempt,
   isPermanentMessagingErrorCode,
+  queueDocumentID,
+  buildNotificationAttemptLog,
+  invalidTokensFromMessagingResponses,
 };

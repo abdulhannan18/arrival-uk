@@ -53,3 +53,43 @@ test("parseTimingToDays supports week/month timing variants", () => {
   assert.equal(__private__.parseTimingToDays("1 month before arrival"), 30);
   assert.equal(__private__.parseTimingToDays("anytime"), 0);
 });
+
+test("notification dropped on error path is logged", () => {
+  const payload = __private__.buildNotificationAttemptLog(
+    "notif_123",
+    "user_123",
+    "task_reminder",
+    "failure",
+    "messaging/internal-error"
+  );
+
+  assert.equal(payload.notificationId, "notif_123");
+  assert.equal(payload.userId, "user_123");
+  assert.equal(payload.type, "task_reminder");
+  assert.equal(payload.channel, "push");
+  assert.equal(payload.result, "failure");
+  assert.equal(payload.error, "messaging/internal-error");
+});
+
+test("duplicate notification blocked by idempotency key", () => {
+  const sendAt = new Date("2026-03-20T09:00:00.000Z");
+  const first = __private__.queueDocumentID("user_123", "task_abc", sendAt);
+  const second = __private__.queueDocumentID("user_123", "task_abc", sendAt);
+  const third = __private__.queueDocumentID("user_123", "task_xyz", sendAt);
+
+  assert.equal(first, second);
+  assert.notEqual(first, third);
+});
+
+test("stale push token removed on invalid registration", () => {
+  const invalidTokens = __private__.invalidTokensFromMessagingResponses(
+    ["good-token", "stale-token", "retry-token"],
+    [
+      { success: true },
+      { success: false, error: { code: "messaging/registration-token-not-registered" } },
+      { success: false, error: { code: "messaging/internal-error" } },
+    ]
+  );
+
+  assert.deepEqual(invalidTokens, ["stale-token"]);
+});

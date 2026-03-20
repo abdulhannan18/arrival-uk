@@ -44,13 +44,15 @@ const email_1 = require("./email");
         strict_1.default.ok(urlString);
         const parsed = new URL(urlString);
         const uid = parsed.searchParams.get("uid");
+        const emailType = parsed.searchParams.get("type");
         const ts = parsed.searchParams.get("ts");
         const sig = parsed.searchParams.get("sig");
         strict_1.default.equal(uid, userId);
+        strict_1.default.equal(emailType, email_1.__private__.WEEKLY_DIGEST_EMAIL_TYPE);
         strict_1.default.equal(ts, String(nowMs));
         strict_1.default.ok(sig);
-        strict_1.default.equal(email_1.__private__.isValidUnsubscribeRequest(uid, ts, sig, nowMs + 1_000, "test-unsubscribe-secret"), true);
-        strict_1.default.equal(email_1.__private__.isValidUnsubscribeRequest(uid, ts, `${sig}tampered`, nowMs + 1_000, "test-unsubscribe-secret"), false);
+        strict_1.default.equal(email_1.__private__.isValidUnsubscribeRequest(uid, emailType, ts, sig, nowMs + 1_000, "test-unsubscribe-secret"), true);
+        strict_1.default.equal(email_1.__private__.isValidUnsubscribeRequest(uid, emailType, ts, `${sig}tampered`, nowMs + 1_000, "test-unsubscribe-secret"), false);
     }
     finally {
         if (previousSecret === undefined) {
@@ -60,5 +62,45 @@ const email_1 = require("./email");
             process.env.UNSUBSCRIBE_HMAC_SECRET = previousSecret;
         }
     }
+});
+(0, node_test_1.default)("unsubscribe link token cannot be used for another user", () => {
+    const previousSecret = process.env.UNSUBSCRIBE_HMAC_SECRET;
+    process.env.UNSUBSCRIBE_HMAC_SECRET = "test-unsubscribe-secret";
+    try {
+        const nowMs = 1_725_000_000_000;
+        const urlString = email_1.__private__.buildWeeklyDigestUnsubscribeURL("testUser123", nowMs);
+        strict_1.default.ok(urlString);
+        const parsed = new URL(urlString);
+        const emailType = parsed.searchParams.get("type");
+        const ts = parsed.searchParams.get("ts");
+        const sig = parsed.searchParams.get("sig");
+        strict_1.default.equal(email_1.__private__.isValidUnsubscribeRequest("differentUser456", emailType, ts, sig, nowMs + 1_000, "test-unsubscribe-secret"), false);
+    }
+    finally {
+        if (previousSecret === undefined) {
+            delete process.env.UNSUBSCRIBE_HMAC_SECRET;
+        }
+        else {
+            process.env.UNSUBSCRIBE_HMAC_SECRET = previousSecret;
+        }
+    }
+});
+(0, node_test_1.default)("unsubscribe get renders confirmation not executes", () => {
+    const html = email_1.__private__.renderWeeklyDigestUnsubscribeConfirmation("testUser123", email_1.__private__.WEEKLY_DIGEST_EMAIL_TYPE, "1725000000000", "signature");
+    strict_1.default.match(html, /<form method="POST">/);
+    strict_1.default.match(html, /Confirm unsubscribe/);
+    strict_1.default.doesNotMatch(html, /You will no longer receive weekly digest emails/);
+});
+(0, node_test_1.default)("digest not sent twice in same week", () => {
+    const firstWindow = email_1.__private__.weeklyDigestWindowKey(new Date("2026-03-16T09:00:00.000Z"));
+    const secondWindow = email_1.__private__.weeklyDigestWindowKey(new Date("2026-03-18T12:00:00.000Z"));
+    strict_1.default.equal(firstWindow, secondWindow);
+    strict_1.default.equal(email_1.__private__.weeklyDigestIdempotencyKey("user_123", firstWindow), email_1.__private__.weeklyDigestIdempotencyKey("user_123", secondWindow));
+    strict_1.default.equal(email_1.__private__.digestReservationAction("sent"), "skip");
+    strict_1.default.equal(email_1.__private__.digestReservationAction("reserved"), "skip");
+});
+(0, node_test_1.default)("digest retry succeeds when previous send failed", () => {
+    strict_1.default.equal(email_1.__private__.digestReservationAction("failed"), "reserve");
+    strict_1.default.equal(email_1.__private__.digestReservationAction(null), "reserve");
 });
 //# sourceMappingURL=email.test.js.map

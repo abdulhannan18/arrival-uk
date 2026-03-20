@@ -48,18 +48,34 @@ test("weekly digest unsubscribe URL is signed and validates", () => {
 
     const parsed = new URL(urlString!);
     const uid = parsed.searchParams.get("uid");
+    const emailType = parsed.searchParams.get("type");
     const ts = parsed.searchParams.get("ts");
     const sig = parsed.searchParams.get("sig");
     assert.equal(uid, userId);
+    assert.equal(emailType, __private__.WEEKLY_DIGEST_EMAIL_TYPE);
     assert.equal(ts, String(nowMs));
     assert.ok(sig);
 
     assert.equal(
-      __private__.isValidUnsubscribeRequest(uid!, ts!, sig!, nowMs + 1_000, "test-unsubscribe-secret"),
+      __private__.isValidUnsubscribeRequest(
+        uid!,
+        emailType!,
+        ts!,
+        sig!,
+        nowMs + 1_000,
+        "test-unsubscribe-secret"
+      ),
       true
     );
     assert.equal(
-      __private__.isValidUnsubscribeRequest(uid!, ts!, `${sig}tampered`, nowMs + 1_000, "test-unsubscribe-secret"),
+      __private__.isValidUnsubscribeRequest(
+        uid!,
+        emailType!,
+        ts!,
+        `${sig}tampered`,
+        nowMs + 1_000,
+        "test-unsubscribe-secret"
+      ),
       false
     );
   } finally {
@@ -69,4 +85,69 @@ test("weekly digest unsubscribe URL is signed and validates", () => {
       process.env.UNSUBSCRIBE_HMAC_SECRET = previousSecret;
     }
   }
+});
+
+test("unsubscribe link token cannot be used for another user", () => {
+  const previousSecret = process.env.UNSUBSCRIBE_HMAC_SECRET;
+  process.env.UNSUBSCRIBE_HMAC_SECRET = "test-unsubscribe-secret";
+
+  try {
+    const nowMs = 1_725_000_000_000;
+    const urlString = __private__.buildWeeklyDigestUnsubscribeURL("testUser123", nowMs);
+    assert.ok(urlString);
+
+    const parsed = new URL(urlString!);
+    const emailType = parsed.searchParams.get("type");
+    const ts = parsed.searchParams.get("ts");
+    const sig = parsed.searchParams.get("sig");
+
+    assert.equal(
+      __private__.isValidUnsubscribeRequest(
+        "differentUser456",
+        emailType!,
+        ts!,
+        sig!,
+        nowMs + 1_000,
+        "test-unsubscribe-secret"
+      ),
+      false
+    );
+  } finally {
+    if (previousSecret === undefined) {
+      delete process.env.UNSUBSCRIBE_HMAC_SECRET;
+    } else {
+      process.env.UNSUBSCRIBE_HMAC_SECRET = previousSecret;
+    }
+  }
+});
+
+test("unsubscribe get renders confirmation not executes", () => {
+  const html = __private__.renderWeeklyDigestUnsubscribeConfirmation(
+    "testUser123",
+    __private__.WEEKLY_DIGEST_EMAIL_TYPE,
+    "1725000000000",
+    "signature"
+  );
+
+  assert.match(html, /<form method="POST">/);
+  assert.match(html, /Confirm unsubscribe/);
+  assert.doesNotMatch(html, /You will no longer receive weekly digest emails/);
+});
+
+test("digest not sent twice in same week", () => {
+  const firstWindow = __private__.weeklyDigestWindowKey(new Date("2026-03-16T09:00:00.000Z"));
+  const secondWindow = __private__.weeklyDigestWindowKey(new Date("2026-03-18T12:00:00.000Z"));
+
+  assert.equal(firstWindow, secondWindow);
+  assert.equal(
+    __private__.weeklyDigestIdempotencyKey("user_123", firstWindow),
+    __private__.weeklyDigestIdempotencyKey("user_123", secondWindow)
+  );
+  assert.equal(__private__.digestReservationAction("sent"), "skip");
+  assert.equal(__private__.digestReservationAction("reserved"), "skip");
+});
+
+test("digest retry succeeds when previous send failed", () => {
+  assert.equal(__private__.digestReservationAction("failed"), "reserve");
+  assert.equal(__private__.digestReservationAction(null), "reserve");
 });

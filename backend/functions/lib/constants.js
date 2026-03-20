@@ -20,6 +20,9 @@ exports.Collections = {
     ops: {
         root: "ops",
         userDeletionCleanupQueue: "userDeletionCleanupQueue",
+        taskSyncOperations: "taskSyncOperations",
+        marketplacePayments: "marketplacePayments",
+        emailDigestSends: "emailDigestSends",
         items: "items",
     },
     notifications: {
@@ -30,6 +33,7 @@ exports.Collections = {
     content: {
         root: "content",
         tasks: "tasks",
+        syncedTasks: "syncedTasks",
         items: "items",
     },
 };

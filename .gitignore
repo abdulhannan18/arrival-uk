@@ -76,3 +76,4 @@ docs/generated/
 # Backend local install artifacts
 backend/functions/node_modules/
 backend/functions/.firebase/
+backend/functions/firestore-debug.log

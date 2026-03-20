@@ -15,6 +15,9 @@ export {
   unregisterDeviceToken,
 } from "./notifications";
 
+export { taskSync } from "./taskSync";
+export { marketplacePaymentConfirm } from "./marketplacePayments";
+
 export {
   sendWelcomeEmailOnSignup,
   sendWeeklyDigestEmail,

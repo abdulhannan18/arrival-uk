@@ -17,6 +17,9 @@ export const Collections = {
   ops: {
     root: "ops",
     userDeletionCleanupQueue: "userDeletionCleanupQueue",
+    taskSyncOperations: "taskSyncOperations",
+    marketplacePayments: "marketplacePayments",
+    emailDigestSends: "emailDigestSends",
     items: "items",
   },
   notifications: {
@@ -27,6 +30,7 @@ export const Collections = {
   content: {
     root: "content",
     tasks: "tasks",
+    syncedTasks: "syncedTasks",
     items: "items",
   },
 } as const;

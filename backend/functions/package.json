@@ -10,7 +10,8 @@
     "lint": "tsc -p . --noEmit",
     "serve": "firebase emulators:start --only functions",
     "deploy": "firebase deploy --only functions",
-    "test": "npm run build && node --test \"lib/**/*.test.js\""
+    "test": "npm run build && firebase emulators:exec --project arrivaluk-ci --only firestore --config ../firebase.json \"npm run test:compiled\"",
+    "test:compiled": "node --test \"lib/**/*.test.js\""
   },
   "dependencies": {
     "@sendgrid/mail": "^8.1.5",
@@ -19,7 +20,9 @@
     "twilio": "^5.5.3"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^4.0.1",
     "@types/node": "^20.19.33",
+    "firebase-tools": "^14.27.0",
     "typescript": "^5.6.3"
   }
 }

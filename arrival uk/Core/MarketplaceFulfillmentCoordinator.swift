@@ -30,19 +30,38 @@ final class MarketplaceFulfillmentCoordinator {
         defer { inFlightProviderIDs.remove(providerID) }
         lastErrorMessage = nil
 
+        guard let userID = resolvedUserID() else {
+            lastErrorMessage = "Sign in required before launching a paid marketplace provider."
+            return nil
+        }
+
         let isUnlocked = await walletManager.requestAccessAsync()
         guard isUnlocked else {
             lastErrorMessage = "Unlock required before sharing identity with provider."
             return nil
         }
 
-        let paymentResult = await MarketplacePaymentCoordinator.shared.processServicePayment(for: descriptor)
+        let missingDocuments = descriptor.requiredDocs.filter { requiredDocument in
+            !walletManager.documents.contains { $0.type == requiredDocument.secureDocType }
+        }
+        if !missingDocuments.isEmpty {
+            lastErrorMessage = "Required wallet documents are missing for this provider."
+            return nil
+        }
+
+        let paymentResult = await MarketplacePaymentCoordinator.shared.processServicePayment(
+            for: descriptor,
+            userID: userID
+        )
         switch paymentResult {
-        case .failed:
-            lastErrorMessage = MarketplaceProviderError.paymentFailed.localizedDescription
+        case .failed(let error):
+            lastErrorMessage = error.localizedDescription
             return nil
         case .cancelled:
             lastErrorMessage = "Payment cancelled."
+            return nil
+        case .pending:
+            lastErrorMessage = "Payment is pending confirmation."
             return nil
         case .unavailable:
             if descriptor.requiresPayment {
@@ -53,7 +72,6 @@ final class MarketplaceFulfillmentCoordinator {
             break
         }
 
-        let userID = resolvedUserID()
         guard let identityToken = MarketplaceIdentityTokenService.issueTemporaryToken(
             providerID: providerID,
             userID: userID,
@@ -118,14 +136,14 @@ final class MarketplaceFulfillmentCoordinator {
         return regionProviders.first(where: { $0.normalizedProviderID == providerID })
     }
 
-    private func resolvedUserID() -> String {
+    private func resolvedUserID() -> String? {
         #if canImport(FirebaseAuth) && canImport(FirebaseFirestore) && canImport(FirebaseFunctions) && canImport(FirebaseCore)
         if let uid = AuthenticationManager.shared?.currentUser?.uid,
            !uid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return uid
         }
         #endif
-        return CollaborationSyncEngine.shared.journeyID
+        return nil
     }
 }
 

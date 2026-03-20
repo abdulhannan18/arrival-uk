@@ -88,12 +88,15 @@ final class Phase13CollaborationCRDTTests: XCTestCase {
     }
 
     func testWalletShareTokenExpiresAndValidatesSignature() {
-        let token = WalletShareAuthorizationService.issueToken(
+        guard let token = WalletShareAuthorizationService.issueToken(
             documentID: UUID(),
             issuedBy: "mentor-user",
             ttlSeconds: 60,
             allowsSensitiveFields: false
-        )
+        ) else {
+            XCTFail("Expected wallet share token to be issued")
+            return
+        }
 
         XCTAssertTrue(WalletShareAuthorizationService.validate(token))
         XCTAssertFalse(

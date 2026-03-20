@@ -1,6 +1,7 @@
 import XCTest
 @testable import arrival_uk
 
+@MainActor
 final class Phase15GlobalInfrastructureTests: XCTestCase {
     override func tearDown() {
         super.tearDown()

@@ -45,6 +45,7 @@ struct MarketplaceProviderDescriptor: Codable, Hashable, Sendable, Identifiable 
     let completionTaskID: String?
     let completionCategoryID: String?
     let paymentMode: MarketplacePaymentMode
+    let paymentProductID: String?
     let priceGBP: Decimal?
     let discoveryTag: String?
     let supportedRegions: [ArrivalRegion]
@@ -71,6 +72,7 @@ struct MarketplaceProviderDescriptor: Codable, Hashable, Sendable, Identifiable 
         completionTaskID: String?,
         completionCategoryID: String?,
         paymentMode: MarketplacePaymentMode,
+        paymentProductID: String?,
         priceGBP: Decimal?,
         discoveryTag: String?,
         supportedRegions: [ArrivalRegion] = []
@@ -86,6 +88,8 @@ struct MarketplaceProviderDescriptor: Codable, Hashable, Sendable, Identifiable 
         self.completionTaskID = completionTaskID
         self.completionCategoryID = completionCategoryID
         self.paymentMode = paymentMode
+        self.paymentProductID = paymentProductID?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         self.priceGBP = priceGBP
         self.discoveryTag = discoveryTag
 
@@ -151,7 +155,10 @@ struct MarketplaceNetworkServiceProvider: ServiceProvider {
     }
 
     func initiateOnboarding(context: MarketplaceOnboardingContext) async throws -> OnboardingResult {
-        guard let endpoint = descriptor.onboardingURL else {
+        guard let endpoint = descriptor.onboardingURL,
+              endpoint.scheme?.lowercased() == "https",
+              let host = endpoint.host,
+              AppConfig.isAllowedMarketplaceProviderHost(host) else {
             throw MarketplaceProviderError.unavailable
         }
 

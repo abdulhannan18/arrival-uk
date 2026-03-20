@@ -1,6 +1,7 @@
 import XCTest
 @testable import arrival_uk
 
+@MainActor
 final class Phase14MarketplaceFederationTests: XCTestCase {
     func testIdentityTokenIsScopedAndExpires() {
         let issued = MarketplaceIdentityTokenService.issueTemporaryToken(
@@ -15,6 +16,7 @@ final class Phase14MarketplaceFederationTests: XCTestCase {
 
         let payloadNow = MarketplaceIdentityTokenService.validateTemporaryToken(issued, now: .now)
         XCTAssertNotNil(payloadNow)
+        XCTAssertFalse(payloadNow?.tokenID.isEmpty ?? true)
         XCTAssertEqual(payloadNow?.providerID, "giffgaff_sim")
         XCTAssertEqual(Set(payloadNow?.fieldScope ?? []), Set([.fullName, .ukAddress]))
 

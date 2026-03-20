@@ -2,13 +2,38 @@ import Foundation
 import CryptoKit
 import Security
 
+@available(iOS 17.0, *)
+protocol SecureHTTPRequestAuthorizing: Sendable {
+    func authorizationHeaders(for url: URL) async throws -> [String: String]
+}
+
+@available(iOS 17.0, *)
+private struct DefaultSecureHTTPRequestAuthorizer: SecureHTTPRequestAuthorizing {
+    func authorizationHeaders(for url: URL) async throws -> [String: String] {
+        #if canImport(FirebaseAuth) && canImport(FirebaseFirestore) && canImport(FirebaseFunctions) && canImport(FirebaseCore)
+        guard let token = try await AuthenticationManager.shared?.authorizationBearerToken() else {
+            return [:]
+        }
+        return ["Authorization": "Bearer \(token)"]
+        #else
+        return [:]
+        #endif
+    }
+}
+
 /// Minimal, production-safe networking client that enforces HTTPS by default.
 /// Requires iOS 17.0+
 @available(iOS 17.0, *)
 final class SecureHTTPClient: NSObject, URLSessionDelegate {
     static let shared = SecureHTTPClient()
 
+    struct RawResponse {
+        let data: Data
+        let response: HTTPURLResponse
+    }
+
     private let sessionConfiguration: URLSessionConfiguration
+    private let authorizer: any SecureHTTPRequestAuthorizing
     private lazy var session: URLSession = {
         URLSession(
             configuration: sessionConfiguration,
@@ -17,13 +42,19 @@ final class SecureHTTPClient: NSObject, URLSessionDelegate {
         )
     }()
 
-    init(configuration: URLSessionConfiguration = .default) {
+    init(
+        configuration: URLSessionConfiguration = .default,
+        authorizer: (any SecureHTTPRequestAuthorizing)? = nil
+    ) {
         let config = (configuration.copy() as? URLSessionConfiguration) ?? .default
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 60
+        config.timeoutIntervalForRequest = AppConfig.requestTimeout
+        config.timeoutIntervalForResource = AppConfig.resourceTimeout
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.waitsForConnectivity = true
+        config.tlsMinimumSupportedProtocolVersion = .TLSv12
+        config.tlsMaximumSupportedProtocolVersion = .TLSv13
         self.sessionConfiguration = config
+        self.authorizer = authorizer ?? DefaultSecureHTTPRequestAuthorizer()
         super.init()
     }
 
@@ -34,6 +65,30 @@ final class SecureHTTPClient: NSObject, URLSessionDelegate {
         body: Data? = nil,
         decoder: JSONDecoder = JSONDecoder()
     ) async throws -> Response {
+        let rawResponse = try await execute(
+            endpoint: endpoint,
+            method: method,
+            headers: headers,
+            body: body
+        )
+
+        guard (200 ... 299).contains(rawResponse.response.statusCode) else {
+            throw SecureHTTPClientError.httpStatus(rawResponse.response.statusCode)
+        }
+
+        do {
+            return try decoder.decode(Response.self, from: rawResponse.data)
+        } catch {
+            throw SecureHTTPClientError.decoding(error)
+        }
+    }
+
+    func execute(
+        endpoint: String,
+        method: HTTPMethod = .get,
+        headers: [String: String] = [:],
+        body: Data? = nil
+    ) async throws -> RawResponse {
         guard let url = URL(string: endpoint) else {
             throw SecureHTTPClientError.invalidURL(endpoint)
         }
@@ -52,7 +107,17 @@ final class SecureHTTPClient: NSObject, URLSessionDelegate {
             request.setValue(value, forHTTPHeaderField: header)
         }
 
-        let (data, response): (Data, URLResponse)
+        do {
+            let authorizationHeaders = try await authorizer.authorizationHeaders(for: url)
+            for (header, value) in authorizationHeaders where request.value(forHTTPHeaderField: header) == nil {
+                request.setValue(value, forHTTPHeaderField: header)
+            }
+        } catch {
+            throw SecureHTTPClientError.authentication(error)
+        }
+
+        let data: Data
+        let response: URLResponse
         do {
             (data, response) = try await session.data(for: request)
         } catch {
@@ -63,18 +128,8 @@ final class SecureHTTPClient: NSObject, URLSessionDelegate {
             throw SecureHTTPClientError.invalidResponse
         }
 
-        guard (200 ... 299).contains(httpResponse.statusCode) else {
-            throw SecureHTTPClientError.httpStatus(httpResponse.statusCode)
-        }
-
-        do {
-            return try decoder.decode(Response.self, from: data)
-        } catch {
-            throw SecureHTTPClientError.decoding(error)
-        }
+        return RawResponse(data: data, response: httpResponse)
     }
-
-    // MARK: - URLSessionDelegate
 
     func urlSession(
         _ session: URLSession,
@@ -150,12 +205,10 @@ final class SecureHTTPClient: NSObject, URLSessionDelegate {
 
         var cursor = tbsRange.lowerBound
 
-        // Optional [0] EXPLICIT version (v2/v3 certificates).
         if let maybeVersion = derElement(at: cursor, in: certificateData), maybeVersion.tag == 0xA0 {
             cursor = maybeVersion.range.upperBound
         }
 
-        // serialNumber, signature, issuer, validity, subject
         for _ in 0..<5 {
             guard let element = derElement(at: cursor, in: certificateData) else { return nil }
             cursor = element.range.upperBound
@@ -226,6 +279,7 @@ enum SecureHTTPClientError: LocalizedError {
     case insecureScheme(String)
     case invalidResponse
     case httpStatus(Int)
+    case authentication(Error)
     case transport(Error)
     case decoding(Error)
 
@@ -239,6 +293,8 @@ enum SecureHTTPClientError: LocalizedError {
             return "Server returned an invalid response."
         case .httpStatus(let statusCode):
             return "Server request failed with status \(statusCode)."
+        case .authentication:
+            return "Authentication could not be prepared for the request."
         case .transport:
             return "Network request failed. Check your connection and try again."
         case .decoding:

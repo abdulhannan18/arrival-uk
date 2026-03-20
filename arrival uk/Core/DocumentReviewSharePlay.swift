@@ -34,13 +34,13 @@ final class DocumentReviewSharePlayCoordinator {
 
     func startReview(for document: SecureDoc, redactedMode: Bool) async -> Bool {
         let collaboratorID = resolvedCollaboratorID()
-        let token = WalletShareAuthorizationService.issueToken(
+        guard let token = WalletShareAuthorizationService.issueToken(
             documentID: document.id,
             issuedBy: collaboratorID,
             ttlSeconds: 300,
             allowsSensitiveFields: !redactedMode
-        )
-        guard let encodedToken = WalletShareAuthorizationService.encodeToken(token) else {
+        ),
+        let encodedToken = WalletShareAuthorizationService.encodeToken(token) else {
             return false
         }
 

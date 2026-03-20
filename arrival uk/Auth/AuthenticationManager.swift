@@ -20,6 +20,7 @@ final class AuthenticationManager: ObservableObject {
     private let functions: Functions
 
     private var listenerHandle: AuthStateDidChangeListenerHandle?
+    private var tokenRefreshTask: Task<String, Error>?
 
     private init?() {
         guard let firebaseApp = FirebaseApp.app() else {
@@ -36,6 +37,9 @@ final class AuthenticationManager: ObservableObject {
             Task { @MainActor in
                 self.currentUser = user
                 self.isAuthenticated = user != nil
+                if user == nil {
+                    TaskSyncStore.shared.cancelInFlightSync(reason: "auth_state_signed_out")
+                }
                 if let user {
                     await self.syncUserProfile(userId: user.uid)
                 }
@@ -51,6 +55,9 @@ final class AuthenticationManager: ObservableObject {
 
     func signOut() async throws {
         await PushNotificationManager.shared.unregisterDeviceTokenFromBackend()
+        TaskSyncStore.shared.cancelInFlightSync(reason: "sign_out")
+        tokenRefreshTask?.cancel()
+        tokenRefreshTask = nil
         try auth.signOut()
         currentUser = nil
         isAuthenticated = false
@@ -60,9 +67,25 @@ final class AuthenticationManager: ObservableObject {
         guard let user = currentUser else {
             throw AuthBridgeError.notAuthenticated
         }
+        TaskSyncStore.shared.cancelInFlightSync(reason: "delete_account")
+        tokenRefreshTask?.cancel()
+        tokenRefreshTask = nil
         try await user.delete()
         currentUser = nil
         isAuthenticated = false
+    }
+
+    func authorizationBearerToken(
+        refreshWindow: TimeInterval = 5 * 60
+    ) async throws -> String? {
+        guard let user = currentUser else { return nil }
+
+        let tokenResult = try await user.getIDTokenResult()
+        if tokenResult.expirationDate.timeIntervalSinceNow > max(refreshWindow, 30) {
+            return tokenResult.token
+        }
+
+        return try await refreshedBearerToken(for: user)
     }
 
     func trackLogin(platform: String = "ios") async {
@@ -198,6 +221,19 @@ final class AuthenticationManager: ObservableObject {
         UserDefaults.standard.set(normalizedTicketID, forKey: storageKey)
 
         return messageID
+    }
+
+    private func refreshedBearerToken(for user: User) async throws -> String {
+        if let tokenRefreshTask {
+            return try await tokenRefreshTask.value
+        }
+
+        let refreshTask = Task { @MainActor [user] in
+            try await user.getIDTokenResult(forcingRefresh: true).token
+        }
+        tokenRefreshTask = refreshTask
+        defer { tokenRefreshTask = nil }
+        return try await refreshTask.value
     }
 
     private func syncUserProfile(userId: String) async {
@@ -353,6 +389,7 @@ final class AuthenticationManager: ObservableObject {
     func trackLogin(platform: String = "ios") async {}
     func trackHomeInteraction(event: String, properties: [String: Any] = [:]) async {}
     func verifyUserProfile() async {}
+    func authorizationBearerToken(refreshWindow: TimeInterval = 5 * 60) async throws -> String? { nil }
     func latestSupportTicketID() -> String { "" }
     func createSupportTicket(
         subject: String,

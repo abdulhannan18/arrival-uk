@@ -1,14 +1,122 @@
 import Foundation
 import Observation
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
+nonisolated enum CollaborationConnectionState: Equatable, Sendable {
+    case disconnected
+    case connecting
+    case connected
+    case disconnecting
+    case reconnecting(attempt: Int)
+    case failed(reason: String)
+}
+
+nonisolated enum CollaborationRealtimeTransportError: Error, Sendable {
+    case notConnected
+    case invalidMessage
+    case joinTimeout
+}
+
+nonisolated struct CollaborationRoomSnapshot: Codable, Sendable {
+    let roomID: String
+    let sequenceNumber: Int64
+    let tasks: [CollaborativeTaskRecord]
+    let presence: [CollaborationSyncEngine.PresenceSignal]
+    let historyEvicted: Bool
+}
+
+nonisolated struct CollaborationRealtimeEnvelope: Codable, Sendable {
+    let type: String
+    let roomID: String
+    let requestID: String?
+    let operationID: String?
+    let sequenceNumber: Int64
+    let historyEvicted: Bool
+    let task: CollaborativeTaskRecord?
+    let tasks: [CollaborativeTaskRecord]?
+    let presence: CollaborationSyncEngine.PresenceSignal?
+    let snapshot: CollaborationRoomSnapshot?
+}
+
+nonisolated protocol CollaborationRealtimeTransport {
+    func connect(url: URL) async throws
+    func disconnect() async
+    func send(_ envelope: CollaborationRealtimeEnvelope) async throws
+    func receive() async throws -> CollaborationRealtimeEnvelope
+}
+
+@available(iOS 17.0, *)
+private actor CollaborationWebSocketTransport: CollaborationRealtimeTransport {
+    private var websocketTask: URLSessionWebSocketTask?
+
+    func connect(url: URL) async throws {
+        await disconnect()
+        let task = URLSession.shared.webSocketTask(with: url)
+        websocketTask = task
+        task.resume()
+    }
+
+    func disconnect() async {
+        websocketTask?.cancel(with: .goingAway, reason: nil)
+        websocketTask = nil
+    }
+
+    func send(_ envelope: CollaborationRealtimeEnvelope) async throws {
+        guard let websocketTask else {
+            throw CollaborationRealtimeTransportError.notConnected
+        }
+
+        let data = try JSONEncoder().encode(envelope)
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw CollaborationRealtimeTransportError.invalidMessage
+        }
+        try await websocketTask.send(.string(text))
+    }
+
+    func receive() async throws -> CollaborationRealtimeEnvelope {
+        guard let websocketTask else {
+            throw CollaborationRealtimeTransportError.notConnected
+        }
+
+        let message = try await websocketTask.receive()
+        let data: Data
+        switch message {
+        case .string(let text):
+            guard let textData = text.data(using: .utf8) else {
+                throw CollaborationRealtimeTransportError.invalidMessage
+            }
+            data = textData
+        case .data(let payload):
+            data = payload
+        @unknown default:
+            throw CollaborationRealtimeTransportError.invalidMessage
+        }
+
+        return try JSONDecoder().decode(CollaborationRealtimeEnvelope.self, from: data)
+    }
+}
+
+/*
+ Collaboration remediation notes:
+ 1. Intended mechanism: room-scoped collaborative task sync using Lamport timestamps inside the CRDT
+    plus a server-issued per-room sequence cursor for ordered delivery and reconnect resync.
+ 2. Broken behavior before this change: inbound messages were accepted without room validation, the
+    receive loop died permanently on the first socket error, reconnect did not re-authenticate or
+    re-subscribe, and out-of-order / duplicate operations could be applied immediately.
+ 3. Backend contract required by this implementation: the realtime server must scope every message
+    by room, validate room membership server-side, answer `join` with a full snapshot + sequence
+    cursor, and answer `resync_request` with either replayable deltas or a `historyEvicted` snapshot.
+ */
 @available(iOS 17.0, *)
 @MainActor
 @Observable
 final class CollaborationSyncEngine {
     static let shared = CollaborationSyncEngine()
 
-    struct PresenceSignal: Codable, Hashable {
+    nonisolated struct PresenceSignal: Codable, Hashable, Equatable, Sendable {
         var userID: String
         var displayName: String
         var isActive: Bool
@@ -16,31 +124,59 @@ final class CollaborationSyncEngine {
         var sentAtMillis: Int64
     }
 
-    private struct RealtimeEnvelope: Codable {
-        var type: String
-        var journeyID: String
-        var task: CollaborativeTaskRecord?
-        var tasks: [CollaborativeTaskRecord]?
-        var presence: PresenceSignal?
+    private struct PersistedRoomState: Codable, Equatable {
+        var taskSet: CollaborativeTaskLWWSet
+        var lastSequence: Int64
+    }
+
+    private struct RoomRuntimeState {
+        var taskSet: CollaborativeTaskLWWSet
+        var lastSequence: Int64
+        var completionOverlay: [String: Date]
+        var bufferedEnvelopes: [Int64: CollaborationRealtimeEnvelope]
+        var seenOperationIDs: [String]
+        var presenceByUserID: [String: PresenceSignal]
     }
 
     private let actorIDKey = StorageKey.collaborationActorID.rawValue
     private let lamportCounterKey = StorageKey.collaborationLamportCounter.rawValue
-    private let taskSetKey = StorageKey.collaborationTaskSet.rawValue
     private let journeyIDKey = StorageKey.collaborationJourneyID.rawValue
     private let heartbeatKey = StorageKey.collaborationPresenceHeartbeat.rawValue
+    private let roomStateKey = StorageKey.collaborationRoomState.rawValue
+    private let activeRoomsKey = StorageKey.collaborationActiveRoomIDs.rawValue
+
+    private let defaults: UserDefaults
+    private let transport: any CollaborationRealtimeTransport
+    private let websocketURL: URL?
+    private let nowProvider: @Sendable () -> Date
+    private let sleepProvider: @Sendable (TimeInterval) async -> Void
+    private let jitterProvider: @Sendable () -> Double
+    private let notificationCenter: NotificationCenter
+    private let maximumReconnectAttempts: Int
+    private let joinTimeoutSeconds: TimeInterval = 10
+    private let stableConnectionResetSeconds: TimeInterval = 5
+    private let presenceGracePeriodSeconds: TimeInterval = 5
+    private let seenOperationLimit = 256
 
     private var actorID: String
     private var lamportCounter: Int64
-    private var taskSet: CollaborativeTaskLWWSet
-    private var completionOverlay: [String: Date] = [:]
-    private var websocketTask: URLSessionWebSocketTask?
-    private var receiveLoopTask: Task<Void, Never>?
-    private var heartbeatTask: Task<Void, Never>?
     private var hasConfigured = false
     private var localViewingTaskID: String?
     private var localDisplayName: String
+    private var localPresenceIsActive = false
+    private var roomStatesByID: [String: RoomRuntimeState]
+    private var activeRoomIDs: Set<String>
+    private var receiveLoopTask: Task<Void, Never>?
+    private var heartbeatTask: Task<Void, Never>?
+    private var reconnectTask: Task<Void, Never>?
+    private var foregroundObserver: NSObjectProtocol?
+    private var pendingResyncRoomIDs: Set<String> = []
+    private var preReceiveBuffer: [CollaborationRealtimeEnvelope] = []
+    private var reconnectAttempt = 0
+    private var connectedAt: Date?
+    private var presenceGraceTasks: [String: Task<Void, Never>] = [:]
 
+    var connectionState: CollaborationConnectionState = .disconnected
     var journeyID: String
     var collaboratorDisplayName = "Roommate"
     var collaboratorViewingTaskID: String?
@@ -55,86 +191,192 @@ final class CollaborationSyncEngine {
         return "\(collaboratorDisplayName) active now"
     }
 
-    private init() {
-        let defaults = UserDefaults.standard
+    init(
+        defaults: UserDefaults = .standard,
+        transport: (any CollaborationRealtimeTransport)? = nil,
+        websocketURL: URL? = nil,
+        nowProvider: @escaping @Sendable () -> Date = Date.init,
+        sleepProvider: @escaping @Sendable (TimeInterval) async -> Void = { delay in
+            let nanoseconds = UInt64(max(0, delay) * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: nanoseconds)
+        },
+        jitterProvider: @escaping @Sendable () -> Double = {
+            Double.random(in: 0.5 ... 1.0)
+        },
+        notificationCenter: NotificationCenter = .default,
+        maximumReconnectAttempts: Int = 10
+    ) {
+        self.defaults = defaults
+        self.transport = transport ?? CollaborationWebSocketTransport()
+        self.websocketURL = websocketURL ?? AppConfig.collaborationWebSocketURL
+        self.nowProvider = nowProvider
+        self.sleepProvider = sleepProvider
+        self.jitterProvider = jitterProvider
+        self.notificationCenter = notificationCenter
+        self.maximumReconnectAttempts = maximumReconnectAttempts
 
         let resolvedActorID: String
-        if let persistedActorID = defaults.string(forKey: StorageKey.collaborationActorID.rawValue),
+        if let persistedActorID = defaults.string(forKey: actorIDKey),
            !persistedActorID.isEmpty {
             resolvedActorID = persistedActorID
         } else {
             resolvedActorID = UUID().uuidString
-            defaults.set(resolvedActorID, forKey: StorageKey.collaborationActorID.rawValue)
+            defaults.set(resolvedActorID, forKey: actorIDKey)
         }
 
-        let resolvedLamportCounter = defaults.object(forKey: StorageKey.collaborationLamportCounter.rawValue) as? Int64 ?? 0
-        let resolvedLocalDisplayName = StudentProfileStore.shared.preferredFirstName ?? "You"
-
-        let resolvedTaskSet: CollaborativeTaskLWWSet
-        if let persistedTaskSetData = defaults.data(forKey: StorageKey.collaborationTaskSet.rawValue),
-           let decodedTaskSet = try? JSONDecoder().decode(CollaborativeTaskLWWSet.self, from: persistedTaskSetData) {
-            resolvedTaskSet = decodedTaskSet
-        } else {
-            resolvedTaskSet = CollaborativeTaskLWWSet()
-        }
-
-        let persistedJourneyID = defaults.string(forKey: StorageKey.collaborationJourneyID.rawValue)?
+        let persistedJourneyID = defaults.string(forKey: journeyIDKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedJourneyID = (persistedJourneyID?.isEmpty == false) ? persistedJourneyID! : "default-journey"
 
+        let persistedRooms = Self.decodePersistedRooms(from: defaults.data(forKey: roomStateKey))
+        let persistedActiveRooms = Set(
+            (defaults.array(forKey: activeRoomsKey) as? [String] ?? [])
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        )
+
+        var runtimeRooms: [String: RoomRuntimeState] = [:]
+        for (roomID, persisted) in persistedRooms {
+            runtimeRooms[roomID] = RoomRuntimeState(
+                taskSet: persisted.taskSet,
+                lastSequence: persisted.lastSequence,
+                completionOverlay: [:],
+                bufferedEnvelopes: [:],
+                seenOperationIDs: [],
+                presenceByUserID: [:]
+            )
+        }
+
         actorID = resolvedActorID
-        lamportCounter = resolvedLamportCounter
-        localDisplayName = resolvedLocalDisplayName
-        taskSet = resolvedTaskSet
+        lamportCounter = defaults.object(forKey: lamportCounterKey) as? Int64 ?? 0
+        localDisplayName = StudentProfileStore.shared.preferredFirstName ?? "You"
         journeyID = resolvedJourneyID
+        activeRoomIDs = persistedActiveRooms.isEmpty ? [resolvedJourneyID] : persistedActiveRooms.union([resolvedJourneyID])
+        roomStatesByID = runtimeRooms
+
+        ensureRoomStateExists(for: resolvedJourneyID)
+        persistRoomMembership()
+        refreshPresenceSummary()
     }
 
     func configureIfNeeded() {
         guard !hasConfigured else { return }
         hasConfigured = true
-        connectRealtimeChannelIfNeeded()
+
+        foregroundObserver = notificationCenter.addObserver(
+            forName: UIApplication.willEnterForegroundNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                await self.handleWillEnterForeground()
+            }
+        }
+
+        Task { @MainActor in
+            await connectRealtimeChannelIfNeeded(forceReconnect: false)
+        }
     }
 
     func setJourneyID(_ journeyID: String) {
-        let normalized = journeyID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = normalizeRoomID(journeyID)
         guard !normalized.isEmpty else { return }
+
         self.journeyID = normalized
-        UserDefaults.standard.set(normalized, forKey: journeyIDKey)
+        defaults.set(normalized, forKey: journeyIDKey)
+        joinRoom(normalized)
+        refreshPresenceSummary()
+    }
+
+    func joinRoom(_ roomID: String) {
+        let normalized = normalizeRoomID(roomID)
+        guard !normalized.isEmpty else { return }
+        ensureRoomStateExists(for: normalized)
+        activeRoomIDs.insert(normalized)
+        persistRoomMembership()
+
+        if hasConfigured {
+            Task { @MainActor in
+                await connectRealtimeChannelIfNeeded(forceReconnect: false)
+                if connectionState == .connected {
+                    do {
+                        try await sendJoinRequest(for: normalized)
+                    } catch {
+                        CrashReporter.record(error: error, context: "collaboration_join_\(normalized)")
+                        await handleUnexpectedDisconnect(reason: "join_failed_\(normalized)")
+                    }
+                }
+            }
+        }
+    }
+
+    func leaveRoom(_ roomID: String) {
+        let normalized = normalizeRoomID(roomID)
+        guard activeRoomIDs.contains(normalized) else { return }
+        guard activeRoomIDs.count > 1 || normalized != journeyID else { return }
+
+        activeRoomIDs.remove(normalized)
+        let lastSequence = roomStatesByID[normalized]?.lastSequence ?? 0
+        roomStatesByID.removeValue(forKey: normalized)
+        pendingResyncRoomIDs.remove(normalized)
+        cancelPresenceGraceTasks(for: normalized)
+        persistRoomsState()
+        persistRoomMembership()
+
+        if connectionState == .connected {
+            Task { @MainActor in
+                try? await transport.send(
+                    CollaborationRealtimeEnvelope(
+                        type: "leave",
+                        roomID: normalized,
+                        requestID: nil,
+                        operationID: UUID().uuidString,
+                        sequenceNumber: lastSequence,
+                        historyEvicted: false,
+                        task: nil,
+                        tasks: nil,
+                        presence: currentPresenceSignal(),
+                        snapshot: nil
+                    )
+                )
+            }
+        }
+
+        if journeyID == normalized, let fallbackRoom = activeRoomIDs.sorted().first {
+            journeyID = fallbackRoom
+            defaults.set(fallbackRoom, forKey: journeyIDKey)
+        }
+        refreshPresenceSummary()
     }
 
     func markLocalPresence(isActive: Bool) {
+        localPresenceIsActive = isActive
         if !isActive {
             localViewingTaskID = nil
         }
 
-        let presence = PresenceSignal(
-            userID: actorID,
-            displayName: localDisplayName,
-            isActive: isActive,
-            viewingTaskID: localViewingTaskID,
-            sentAtMillis: epochMillis(Date())
-        )
-        UserDefaults.standard.set(Date(), forKey: heartbeatKey)
-        sendPresence(presence)
+        defaults.set(nowProvider(), forKey: heartbeatKey)
 
         if isActive {
             startPresenceHeartbeatIfNeeded()
-            connectRealtimeChannelIfNeeded()
+            Task { @MainActor in
+                await connectRealtimeChannelIfNeeded(forceReconnect: false)
+                await sendCurrentPresence()
+            }
         } else {
             stopPresenceHeartbeat()
+            Task { @MainActor in
+                await sendCurrentPresence()
+            }
         }
     }
 
     func publishViewing(taskID: String?) {
         localViewingTaskID = taskID?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let presence = PresenceSignal(
-            userID: actorID,
-            displayName: localDisplayName,
-            isActive: true,
-            viewingTaskID: localViewingTaskID,
-            sentAtMillis: epochMillis(Date())
-        )
-        sendPresence(presence)
+        Task { @MainActor in
+            await sendCurrentPresence()
+        }
     }
 
     func registerLocalCompletion(
@@ -147,6 +389,8 @@ final class CollaborationSyncEngine {
         let trimmedID = taskID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedID.isEmpty else { return }
 
+        ensureRoomStateExists(for: journeyID)
+        var roomState = roomStatesByID[journeyID] ?? Self.emptyRoomState()
         let timestamp = nextLamportTimestamp()
         let completionMillis = epochMillis(completedAt)
         let record = CollaborativeTaskRecord(
@@ -159,15 +403,22 @@ final class CollaborationSyncEngine {
             timestamp: timestamp,
             completedAtMillis: completionMillis
         )
-        taskSet.upsert(record)
-        completionOverlay[trimmedID] = completedAt
-        persistState()
-        sendTaskUpdate(record)
+        roomState.taskSet.upsert(record)
+        roomState.completionOverlay[trimmedID] = completedAt
+        roomStatesByID[journeyID] = roomState
+        persistRoomsState()
+
+        Task { @MainActor in
+            await sendTaskUpdate(record, roomID: journeyID)
+        }
     }
 
     func consumeCompletionOverlay() -> [String: Date] {
-        let snapshot = completionOverlay
-        completionOverlay = [:]
+        ensureRoomStateExists(for: journeyID)
+        var roomState = roomStatesByID[journeyID] ?? Self.emptyRoomState()
+        let snapshot = roomState.completionOverlay
+        roomState.completionOverlay = [:]
+        roomStatesByID[journeyID] = roomState
         return snapshot
     }
 
@@ -178,34 +429,474 @@ final class CollaborationSyncEngine {
             return false
         }
 
+        let roomID = normalizeRoomID(
+            (userInfo["journeyID"] as? String)
+                ?? (userInfo["roomID"] as? String)
+                ?? (userInfo["roomId"] as? String)
+        )
+        guard !roomID.isEmpty, activeRoomIDs.contains(roomID) else { return false }
+
         let records = decodeTaskRecords(from: userInfo["tasks"])
-        let didMerge = mergeRemote(records: records)
+        let didMerge = mergeRemote(records: records, roomID: roomID)
         if didMerge {
-            NotificationCenter.default.post(name: .didReceiveSilentCollaborationSync, object: nil, userInfo: userInfo)
+            notificationCenter.post(name: .didReceiveSilentCollaborationSync, object: nil, userInfo: userInfo)
         }
         return didMerge
     }
 
     func mergeRemote(records: [CollaborativeTaskRecord]) -> Bool {
-        guard !records.isEmpty else { return false }
+        mergeRemote(records: records, roomID: journeyID)
+    }
 
-        let beforeMap = Dictionary(uniqueKeysWithValues: taskSet.resolvedEntries.map { ($0.id, $0) })
-        var remoteSet = CollaborativeTaskLWWSet()
+    func mergeRemote(records: [CollaborativeTaskRecord], roomID: String) -> Bool {
+        let normalizedRoomID = normalizeRoomID(roomID)
+        guard !normalizedRoomID.isEmpty else { return false }
+        ensureRoomStateExists(for: normalizedRoomID)
+
+        var roomState = roomStatesByID[normalizedRoomID] ?? Self.emptyRoomState()
+        let beforeEntries = Dictionary(uniqueKeysWithValues: roomState.taskSet.resolvedEntries.map { ($0.id, $0) })
         for record in records {
-            remoteSet.upsert(record)
+            roomState.taskSet.upsert(record)
         }
-        taskSet.merge(with: remoteSet)
-        let afterEntries = taskSet.resolvedEntries
+        let didMutate = updateCompletionOverlay(
+            roomID: normalizedRoomID,
+            beforeEntries: beforeEntries,
+            roomState: &roomState
+        )
+        roomStatesByID[normalizedRoomID] = roomState
+        if didMutate {
+            persistRoomsState()
+        }
+        refreshPresenceSummary()
+        return didMutate
+    }
 
+    func connectionStateForTesting() -> CollaborationConnectionState {
+        connectionState
+    }
+
+    func activeRoomIDsForTesting() -> Set<String> {
+        activeRoomIDs
+    }
+
+    func taskRecordsForTesting(roomID: String) -> [CollaborativeTaskRecord] {
+        roomStatesByID[normalizeRoomID(roomID)]?.taskSet.resolvedEntries ?? []
+    }
+
+    func lastSequenceForTesting(roomID: String) -> Int64 {
+        roomStatesByID[normalizeRoomID(roomID)]?.lastSequence ?? 0
+    }
+
+    func handleIncomingEnvelopeForTesting(_ envelope: CollaborationRealtimeEnvelope) async {
+        await ingestIncomingEnvelope(envelope)
+    }
+
+    func triggerForegroundReconnectForTesting() async {
+        await handleWillEnterForeground()
+    }
+
+    nonisolated static func reconnectDelaySeconds(forAttempt attempt: Int, jitter: Double) -> TimeInterval {
+        let normalizedAttempt = max(1, attempt)
+        let cappedBase = min(pow(2.0, Double(normalizedAttempt - 1)), 60.0)
+        let boundedJitter = min(max(jitter, 0.5), 1.0)
+        return min(cappedBase * boundedJitter, 60.0)
+    }
+
+    private static func decodePersistedRooms(from data: Data?) -> [String: PersistedRoomState] {
+        guard let data,
+              let decoded = try? JSONDecoder().decode([String: PersistedRoomState].self, from: data) else {
+            return [:]
+        }
+        return decoded
+    }
+
+    private static func emptyRoomState() -> RoomRuntimeState {
+        RoomRuntimeState(
+            taskSet: CollaborativeTaskLWWSet(),
+            lastSequence: 0,
+            completionOverlay: [:],
+            bufferedEnvelopes: [:],
+            seenOperationIDs: [],
+            presenceByUserID: [:]
+        )
+    }
+
+    private func ensureRoomStateExists(for roomID: String) {
+        if roomStatesByID[roomID] == nil {
+            roomStatesByID[roomID] = Self.emptyRoomState()
+        }
+    }
+
+    private func persistRoomMembership() {
+        defaults.set(activeRoomIDs.sorted(), forKey: activeRoomsKey)
+    }
+
+    private func persistRoomsState() {
+        let persisted = roomStatesByID.mapValues { roomState in
+            PersistedRoomState(
+                taskSet: roomState.taskSet,
+                lastSequence: roomState.lastSequence
+            )
+        }
+        guard let encoded = try? JSONEncoder().encode(persisted) else { return }
+        defaults.set(encoded, forKey: roomStateKey)
+    }
+
+    private func normalizeRoomID(_ value: String?) -> String {
+        value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    private func connectRealtimeChannelIfNeeded(forceReconnect: Bool) async {
+        if !forceReconnect {
+            switch connectionState {
+            case .connecting, .connected, .reconnecting:
+                return
+            case .disconnected, .disconnecting, .failed:
+                break
+            }
+        } else {
+            await disconnectTransport(markFailed: false)
+        }
+
+        guard let websocketURL else {
+            connectionState = .failed(reason: "missing_collaboration_websocket_url")
+            return
+        }
+
+        if activeRoomIDs.isEmpty {
+            activeRoomIDs.insert(journeyID)
+            persistRoomMembership()
+        }
+
+        connectionState = reconnectAttempt == 0 ? .connecting : .reconnecting(attempt: reconnectAttempt)
+        do {
+            try await transport.connect(url: websocketURL)
+            preReceiveBuffer = []
+            for roomID in activeRoomIDs.sorted() {
+                try await joinRoomOnTransport(roomID)
+            }
+            startReceiveLoop()
+            connectedAt = nowProvider()
+            connectionState = .connected
+            if localPresenceIsActive {
+                startPresenceHeartbeatIfNeeded()
+                await sendCurrentPresence()
+            }
+        } catch {
+            CrashReporter.record(error: error, context: "collaboration_connect")
+            await handleUnexpectedDisconnect(reason: "connect_failed")
+        }
+    }
+
+    private func joinRoomOnTransport(_ roomID: String) async throws {
+        ensureRoomStateExists(for: roomID)
+        let roomState = roomStatesByID[roomID] ?? Self.emptyRoomState()
+        let requestID = UUID().uuidString
+        try await transport.send(
+            CollaborationRealtimeEnvelope(
+                type: "join",
+                roomID: roomID,
+                requestID: requestID,
+                operationID: UUID().uuidString,
+                sequenceNumber: roomState.lastSequence,
+                historyEvicted: false,
+                task: nil,
+                tasks: nil,
+                presence: currentPresenceSignal(),
+                snapshot: nil
+            )
+        )
+
+        let deadline = nowProvider().addingTimeInterval(joinTimeoutSeconds)
+        while nowProvider() < deadline {
+            let envelope = try await transport.receive()
+            if envelope.type == "snapshot",
+               envelope.roomID == roomID,
+               envelope.requestID == requestID {
+                applySnapshotEnvelope(envelope, roomID: roomID)
+                return
+            }
+            preReceiveBuffer.append(envelope)
+        }
+
+        throw CollaborationRealtimeTransportError.joinTimeout
+    }
+
+    private func sendJoinRequest(for roomID: String) async throws {
+        ensureRoomStateExists(for: roomID)
+        let roomState = roomStatesByID[roomID] ?? Self.emptyRoomState()
+        try await transport.send(
+            CollaborationRealtimeEnvelope(
+                type: "join",
+                roomID: roomID,
+                requestID: UUID().uuidString,
+                operationID: UUID().uuidString,
+                sequenceNumber: roomState.lastSequence,
+                historyEvicted: false,
+                task: nil,
+                tasks: nil,
+                presence: currentPresenceSignal(),
+                snapshot: nil
+            )
+        )
+    }
+
+    private func startReceiveLoop() {
+        receiveLoopTask?.cancel()
+        receiveLoopTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            while !self.preReceiveBuffer.isEmpty {
+                let buffered = self.preReceiveBuffer.removeFirst()
+                await self.ingestIncomingEnvelope(buffered)
+            }
+
+            while !Task.isCancelled {
+                do {
+                    let envelope = try await self.transport.receive()
+                    await self.ingestIncomingEnvelope(envelope)
+                } catch is CancellationError {
+                    return
+                } catch {
+                    CrashReporter.record(error: error, context: "collaboration_receive_loop")
+                    await self.handleUnexpectedDisconnect(reason: "receive_failed")
+                    return
+                }
+            }
+        }
+    }
+
+    private func sendTaskUpdate(_ task: CollaborativeTaskRecord, roomID: String) async {
+        guard connectionState == .connected else { return }
+        let normalizedRoomID = normalizeRoomID(roomID)
+        guard !normalizedRoomID.isEmpty else { return }
+        let sequenceNumber = (roomStatesByID[normalizedRoomID]?.lastSequence ?? 0) + 1
+        let envelope = CollaborationRealtimeEnvelope(
+            type: "task_update",
+            roomID: normalizedRoomID,
+            requestID: nil,
+            operationID: UUID().uuidString,
+            sequenceNumber: sequenceNumber,
+            historyEvicted: false,
+            task: task,
+            tasks: nil,
+            presence: nil,
+            snapshot: nil
+        )
+        do {
+            try await transport.send(envelope)
+        } catch {
+            CrashReporter.record(error: error, context: "collaboration_send_task")
+            await handleUnexpectedDisconnect(reason: "task_send_failed")
+        }
+    }
+
+    private func sendCurrentPresence() async {
+        guard connectionState == .connected else { return }
+        let presence = currentPresenceSignal()
+        for roomID in activeRoomIDs.sorted() {
+            let sequenceNumber = (roomStatesByID[roomID]?.lastSequence ?? 0) + 1
+            let envelope = CollaborationRealtimeEnvelope(
+                type: "presence",
+                roomID: roomID,
+                requestID: nil,
+                operationID: UUID().uuidString,
+                sequenceNumber: sequenceNumber,
+                historyEvicted: false,
+                task: nil,
+                tasks: nil,
+                presence: presence,
+                snapshot: nil
+            )
+            do {
+                try await transport.send(envelope)
+            } catch {
+                CrashReporter.record(error: error, context: "collaboration_send_presence")
+                await handleUnexpectedDisconnect(reason: "presence_send_failed")
+                return
+            }
+        }
+    }
+
+    private func currentPresenceSignal() -> PresenceSignal {
+        PresenceSignal(
+            userID: actorID,
+            displayName: localDisplayName,
+            isActive: localPresenceIsActive,
+            viewingTaskID: localViewingTaskID,
+            sentAtMillis: epochMillis(nowProvider())
+        )
+    }
+
+    private func ingestIncomingEnvelope(_ envelope: CollaborationRealtimeEnvelope) async {
+        let roomID = normalizeRoomID(envelope.roomID)
+        guard !roomID.isEmpty, activeRoomIDs.contains(roomID) else { return }
+        ensureRoomStateExists(for: roomID)
+
+        switch envelope.type {
+        case "snapshot":
+            applySnapshotEnvelope(envelope, roomID: roomID)
+        case "peer_disconnected":
+            if let presence = envelope.presence, presence.userID != actorID {
+                schedulePresenceGraceRemoval(for: presence.userID, roomID: roomID)
+            }
+        case "task_update", "presence":
+            applyOperationalEnvelope(envelope, roomID: roomID)
+        default:
+            break
+        }
+    }
+
+    private func applySnapshotEnvelope(_ envelope: CollaborationRealtimeEnvelope, roomID: String) {
+        let snapshot = envelope.snapshot ?? CollaborationRoomSnapshot(
+            roomID: roomID,
+            sequenceNumber: envelope.sequenceNumber,
+            tasks: envelope.tasks ?? envelope.task.map { [$0] } ?? [],
+            presence: envelope.presence.map { [$0] } ?? [],
+            historyEvicted: envelope.historyEvicted
+        )
+
+        let previousEntries = Dictionary(
+            uniqueKeysWithValues: (roomStatesByID[roomID]?.taskSet.resolvedEntries ?? []).map { ($0.id, $0) }
+        )
+        var nextTaskSet = CollaborativeTaskLWWSet()
+        for task in snapshot.tasks {
+            nextTaskSet.upsert(task)
+        }
+
+        var roomState = roomStatesByID[roomID] ?? Self.emptyRoomState()
+        roomState.taskSet = nextTaskSet
+        roomState.lastSequence = snapshot.sequenceNumber
+        if snapshot.historyEvicted {
+            roomState.bufferedEnvelopes = [:]
+        } else {
+            roomState.bufferedEnvelopes = roomState.bufferedEnvelopes.filter { $0.key > roomState.lastSequence }
+        }
+        roomState.presenceByUserID = Dictionary(uniqueKeysWithValues: snapshot.presence.map { ($0.userID, $0) })
+        roomStatesByID[roomID] = roomState
+        _ = updateCompletionOverlay(roomID: roomID, beforeEntries: previousEntries, roomState: &roomState)
+        roomStatesByID[roomID] = roomState
+        pendingResyncRoomIDs.remove(roomID)
+        persistRoomsState()
+        refreshPresenceSummary()
+        drainBufferedEnvelopes(for: roomID)
+    }
+
+    private func applyOperationalEnvelope(_ envelope: CollaborationRealtimeEnvelope, roomID: String) {
+        var roomState = roomStatesByID[roomID] ?? Self.emptyRoomState()
+        if let operationID = envelope.operationID,
+           roomState.seenOperationIDs.contains(operationID) {
+            return
+        }
+
+        let nextExpected = roomState.lastSequence + 1
+        if envelope.sequenceNumber <= roomState.lastSequence {
+            return
+        }
+
+        if envelope.sequenceNumber > nextExpected {
+            roomState.bufferedEnvelopes[envelope.sequenceNumber] = envelope
+            roomStatesByID[roomID] = roomState
+            persistRoomsState()
+            requestResyncIfNeeded(for: roomID)
+            return
+        }
+
+        applyOrderedEnvelope(envelope, roomID: roomID, roomState: &roomState)
+        roomStatesByID[roomID] = roomState
+        persistRoomsState()
+        drainBufferedEnvelopes(for: roomID)
+        refreshPresenceSummary()
+    }
+
+    private func applyOrderedEnvelope(
+        _ envelope: CollaborationRealtimeEnvelope,
+        roomID: String,
+        roomState: inout RoomRuntimeState
+    ) {
+        let beforeEntries = Dictionary(uniqueKeysWithValues: roomState.taskSet.resolvedEntries.map { ($0.id, $0) })
+
+        switch envelope.type {
+        case "task_update":
+            if let task = envelope.task {
+                roomState.taskSet.upsert(task)
+            }
+            for task in envelope.tasks ?? [] {
+                roomState.taskSet.upsert(task)
+            }
+        case "presence":
+            if let presence = envelope.presence, presence.userID != actorID {
+                cancelPresenceGraceRemoval(for: presence.userID, roomID: roomID)
+                roomState.presenceByUserID[presence.userID] = presence
+            }
+        default:
+            break
+        }
+
+        roomState.lastSequence = envelope.sequenceNumber
+        if let operationID = envelope.operationID {
+            roomState.seenOperationIDs.append(operationID)
+            if roomState.seenOperationIDs.count > seenOperationLimit {
+                roomState.seenOperationIDs.removeFirst(roomState.seenOperationIDs.count - seenOperationLimit)
+            }
+        }
+
+        _ = updateCompletionOverlay(roomID: roomID, beforeEntries: beforeEntries, roomState: &roomState)
+    }
+
+    private func drainBufferedEnvelopes(for roomID: String) {
+        guard var roomState = roomStatesByID[roomID] else { return }
+        while let envelope = roomState.bufferedEnvelopes[roomState.lastSequence + 1] {
+            roomState.bufferedEnvelopes.removeValue(forKey: roomState.lastSequence + 1)
+            applyOrderedEnvelope(envelope, roomID: roomID, roomState: &roomState)
+        }
+        roomStatesByID[roomID] = roomState
+        persistRoomsState()
+    }
+
+    private func requestResyncIfNeeded(for roomID: String) {
+        guard !pendingResyncRoomIDs.contains(roomID) else { return }
+        guard connectionState == .connected else { return }
+        pendingResyncRoomIDs.insert(roomID)
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let sequenceNumber = self.roomStatesByID[roomID]?.lastSequence ?? 0
+            let envelope = CollaborationRealtimeEnvelope(
+                type: "resync_request",
+                roomID: roomID,
+                requestID: UUID().uuidString,
+                operationID: UUID().uuidString,
+                sequenceNumber: sequenceNumber,
+                historyEvicted: false,
+                task: nil,
+                tasks: nil,
+                presence: self.currentPresenceSignal(),
+                snapshot: nil
+            )
+            do {
+                try await self.transport.send(envelope)
+            } catch {
+                CrashReporter.record(error: error, context: "collaboration_resync_request")
+                await self.handleUnexpectedDisconnect(reason: "resync_failed")
+            }
+        }
+    }
+
+    private func updateCompletionOverlay(
+        roomID: String,
+        beforeEntries: [String: CollaborativeTaskRecord],
+        roomState: inout RoomRuntimeState
+    ) -> Bool {
         var didMutate = false
-        for entry in afterEntries where entry.status == .completed {
-            let beforeStatus = beforeMap[entry.id]?.status
-            if beforeStatus != .completed {
-                let completedDate = entry.completedAtMillis.map(dateFromEpochMillis(_:)) ?? .now
-                completionOverlay[entry.id] = completedDate
+        for entry in roomState.taskSet.resolvedEntries where entry.status == .completed {
+            let previousStatus = beforeEntries[entry.id]?.status
+            if previousStatus != .completed {
+                let completedDate = entry.completedAtMillis.map(dateFromEpochMillis(_:)) ?? nowProvider()
+                roomState.completionOverlay[entry.id] = completedDate
                 didMutate = true
 
-                if entry.isTier1Urgent {
+                if entry.isTier1Urgent, roomID == journeyID {
                     Task {
                         await NotificationManager.shared.scheduleCollaborativeUrgentAlert(
                             taskTitle: entry.title,
@@ -215,11 +906,98 @@ final class CollaborationSyncEngine {
                 }
             }
         }
-
-        if didMutate {
-            persistState()
-        }
         return didMutate
+    }
+
+    private func refreshPresenceSummary() {
+        guard let roomState = roomStatesByID[journeyID] else {
+            collaboratorDisplayName = "Roommate"
+            collaboratorViewingTaskID = nil
+            collaboratorIsActive = false
+            collaboratorLastHeartbeatAt = nil
+            return
+        }
+
+        let candidate = roomState.presenceByUserID.values
+            .filter { $0.userID != actorID && $0.isActive }
+            .sorted { lhs, rhs in
+                if lhs.sentAtMillis != rhs.sentAtMillis {
+                    return lhs.sentAtMillis > rhs.sentAtMillis
+                }
+                return lhs.userID < rhs.userID
+            }
+            .first
+
+        guard let candidate else {
+            collaboratorDisplayName = "Roommate"
+            collaboratorViewingTaskID = nil
+            collaboratorIsActive = false
+            collaboratorLastHeartbeatAt = nil
+            return
+        }
+
+        collaboratorDisplayName = candidate.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "Roommate"
+            : candidate.displayName
+        collaboratorViewingTaskID = candidate.viewingTaskID
+        collaboratorIsActive = candidate.isActive
+        collaboratorLastHeartbeatAt = dateFromEpochMillis(candidate.sentAtMillis)
+    }
+
+    private func startPresenceHeartbeatIfNeeded() {
+        guard heartbeatTask == nil else { return }
+        heartbeatTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(25))
+                guard !Task.isCancelled else { return }
+                await self.sendCurrentPresence()
+            }
+        }
+    }
+
+    private func stopPresenceHeartbeat() {
+        heartbeatTask?.cancel()
+        heartbeatTask = nil
+    }
+
+    private func schedulePresenceGraceRemoval(for userID: String, roomID: String) {
+        let key = presenceGraceKey(userID: userID, roomID: roomID)
+        presenceGraceTasks[key]?.cancel()
+        presenceGraceTasks[key] = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.sleepProvider(self.presenceGracePeriodSeconds)
+            guard !Task.isCancelled else { return }
+            var roomState = self.roomStatesByID[roomID] ?? Self.emptyRoomState()
+            roomState.presenceByUserID.removeValue(forKey: userID)
+            self.roomStatesByID[roomID] = roomState
+            self.persistRoomsState()
+            self.refreshPresenceSummary()
+            self.presenceGraceTasks.removeValue(forKey: key)
+        }
+    }
+
+    private func cancelPresenceGraceRemoval(for userID: String, roomID: String) {
+        let key = presenceGraceKey(userID: userID, roomID: roomID)
+        presenceGraceTasks[key]?.cancel()
+        presenceGraceTasks.removeValue(forKey: key)
+    }
+
+    private func cancelPresenceGraceTasks(for roomID: String) {
+        for key in presenceGraceTasks.keys where key.hasSuffix("|\(roomID)") {
+            presenceGraceTasks[key]?.cancel()
+            presenceGraceTasks.removeValue(forKey: key)
+        }
+    }
+
+    private func presenceGraceKey(userID: String, roomID: String) -> String {
+        "\(userID)|\(roomID)"
+    }
+
+    private func nextLamportTimestamp() -> LamportTimestamp {
+        lamportCounter += 1
+        defaults.set(lamportCounter, forKey: lamportCounterKey)
+        return LamportTimestamp(counter: lamportCounter, actorID: actorID)
     }
 
     private func decodeTaskRecords(from rawPayload: Any?) -> [CollaborativeTaskRecord] {
@@ -240,159 +1018,58 @@ final class CollaborationSyncEngine {
         return []
     }
 
-    private func nextLamportTimestamp() -> LamportTimestamp {
-        lamportCounter += 1
-        UserDefaults.standard.set(lamportCounter, forKey: lamportCounterKey)
-        return LamportTimestamp(counter: lamportCounter, actorID: actorID)
-    }
-
-    private func persistState() {
-        guard let encoded = try? JSONEncoder().encode(taskSet) else { return }
-        UserDefaults.standard.set(encoded, forKey: taskSetKey)
-    }
-
-    private func connectRealtimeChannelIfNeeded() {
-        guard websocketTask == nil else { return }
-        guard let websocketURL = AppConfig.collaborationWebSocketURL else { return }
-
-        let task = URLSession.shared.webSocketTask(with: websocketURL)
-        websocketTask = task
-        task.resume()
-        startReceiveLoop()
-        sendHello()
-    }
-
-    private func sendHello() {
-        let envelope = RealtimeEnvelope(
-            type: "hello",
-            journeyID: journeyID,
-            task: nil,
-            tasks: nil,
-            presence: PresenceSignal(
-                userID: actorID,
-                displayName: localDisplayName,
-                isActive: true,
-                viewingTaskID: localViewingTaskID,
-                sentAtMillis: epochMillis(Date())
-            )
-        )
-        sendEnvelope(envelope)
-    }
-
-    private func sendTaskUpdate(_ task: CollaborativeTaskRecord) {
-        let envelope = RealtimeEnvelope(
-            type: "task_update",
-            journeyID: journeyID,
-            task: task,
-            tasks: nil,
-            presence: nil
-        )
-        sendEnvelope(envelope)
-    }
-
-    private func sendPresence(_ presence: PresenceSignal) {
-        let envelope = RealtimeEnvelope(
-            type: "presence",
-            journeyID: journeyID,
-            task: nil,
-            tasks: nil,
-            presence: presence
-        )
-        sendEnvelope(envelope)
-    }
-
-    private func sendEnvelope(_ envelope: RealtimeEnvelope) {
-        guard let websocketTask else { return }
-        guard let data = try? JSONEncoder().encode(envelope),
-              let text = String(data: data, encoding: .utf8) else {
-            return
-        }
-
-        websocketTask.send(.string(text)) { error in
-            guard let error else { return }
-            CrashReporter.record(error: error, context: "collaboration_ws_send")
-        }
-    }
-
-    private func startReceiveLoop() {
-        receiveLoopTask?.cancel()
-        receiveLoopTask = Task {
-            while !Task.isCancelled {
-                guard let websocketTask else { return }
-                do {
-                    let message = try await websocketTask.receive()
-                    switch message {
-                    case .string(let text):
-                        handleRealtimeMessageText(text)
-                    case .data(let data):
-                        if let text = String(data: data, encoding: .utf8) {
-                            handleRealtimeMessageText(text)
-                        }
-                    @unknown default:
-                        break
-                    }
-                } catch {
-                    CrashReporter.record(error: error, context: "collaboration_ws_receive")
-                    self.websocketTask = nil
-                    return
-                }
-            }
-        }
-    }
-
-    private func handleRealtimeMessageText(_ text: String) {
-        guard let data = text.data(using: .utf8),
-              let envelope = try? JSONDecoder().decode(RealtimeEnvelope.self, from: data) else {
-            return
-        }
-
-        switch envelope.type {
-        case "task_update":
-            if let task = envelope.task {
-                _ = mergeRemote(records: [task])
-            } else if let tasks = envelope.tasks {
-                _ = mergeRemote(records: tasks)
-            }
-        case "presence":
-            if let presence = envelope.presence, presence.userID != actorID {
-                applyPresence(presence)
-            }
-        default:
+    private func handleWillEnterForeground() async {
+        switch connectionState {
+        case .disconnected, .failed:
+            await connectRealtimeChannelIfNeeded(forceReconnect: true)
+        case .connecting, .connected, .disconnecting, .reconnecting:
             break
         }
     }
 
-    private func applyPresence(_ presence: PresenceSignal) {
-        collaboratorDisplayName = presence.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? "Roommate"
-            : presence.displayName
-        collaboratorIsActive = presence.isActive
-        collaboratorViewingTaskID = presence.viewingTaskID
-        collaboratorLastHeartbeatAt = dateFromEpochMillis(presence.sentAtMillis)
-    }
-
-    private func startPresenceHeartbeatIfNeeded() {
-        guard heartbeatTask == nil else { return }
-
-        heartbeatTask = Task {
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(25))
-                guard !Task.isCancelled else { return }
-                let signal = PresenceSignal(
-                    userID: actorID,
-                    displayName: localDisplayName,
-                    isActive: true,
-                    viewingTaskID: localViewingTaskID,
-                    sentAtMillis: epochMillis(Date())
-                )
-                sendPresence(signal)
+    private func handleUnexpectedDisconnect(reason: String) async {
+        if let connectedAt, nowProvider().timeIntervalSince(connectedAt) > stableConnectionResetSeconds {
+            reconnectAttempt = 0
+        }
+        connectedAt = nil
+        await disconnectTransport(markFailed: false)
+        for roomID in activeRoomIDs {
+            if let roomState = roomStatesByID[roomID] {
+                for userID in roomState.presenceByUserID.keys where userID != actorID {
+                    schedulePresenceGraceRemoval(for: userID, roomID: roomID)
+                }
             }
+        }
+
+        guard reconnectAttempt < maximumReconnectAttempts else {
+            connectionState = .failed(reason: reason)
+            return
+        }
+
+        reconnectAttempt += 1
+        connectionState = .reconnecting(attempt: reconnectAttempt)
+        let delay = Self.reconnectDelaySeconds(
+            forAttempt: reconnectAttempt,
+            jitter: jitterProvider()
+        )
+
+        reconnectTask?.cancel()
+        reconnectTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.sleepProvider(delay)
+            guard !Task.isCancelled else { return }
+            await self.connectRealtimeChannelIfNeeded(forceReconnect: true)
         }
     }
 
-    private func stopPresenceHeartbeat() {
-        heartbeatTask?.cancel()
-        heartbeatTask = nil
+    private func disconnectTransport(markFailed: Bool) async {
+        connectionState = .disconnecting
+        receiveLoopTask?.cancel()
+        receiveLoopTask = nil
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        await transport.disconnect()
+        connectionState = markFailed ? .failed(reason: "disconnected") : .disconnected
     }
 
     private func epochMillis(_ date: Date) -> Int64 {

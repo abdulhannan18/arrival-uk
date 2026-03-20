@@ -51,4 +51,29 @@ const notifications_1 = require("./notifications");
     strict_1.default.equal(notifications_1.__private__.parseTimingToDays("1 month before arrival"), 30);
     strict_1.default.equal(notifications_1.__private__.parseTimingToDays("anytime"), 0);
 });
+(0, node_test_1.default)("notification dropped on error path is logged", () => {
+    const payload = notifications_1.__private__.buildNotificationAttemptLog("notif_123", "user_123", "task_reminder", "failure", "messaging/internal-error");
+    strict_1.default.equal(payload.notificationId, "notif_123");
+    strict_1.default.equal(payload.userId, "user_123");
+    strict_1.default.equal(payload.type, "task_reminder");
+    strict_1.default.equal(payload.channel, "push");
+    strict_1.default.equal(payload.result, "failure");
+    strict_1.default.equal(payload.error, "messaging/internal-error");
+});
+(0, node_test_1.default)("duplicate notification blocked by idempotency key", () => {
+    const sendAt = new Date("2026-03-20T09:00:00.000Z");
+    const first = notifications_1.__private__.queueDocumentID("user_123", "task_abc", sendAt);
+    const second = notifications_1.__private__.queueDocumentID("user_123", "task_abc", sendAt);
+    const third = notifications_1.__private__.queueDocumentID("user_123", "task_xyz", sendAt);
+    strict_1.default.equal(first, second);
+    strict_1.default.notEqual(first, third);
+});
+(0, node_test_1.default)("stale push token removed on invalid registration", () => {
+    const invalidTokens = notifications_1.__private__.invalidTokensFromMessagingResponses(["good-token", "stale-token", "retry-token"], [
+        { success: true },
+        { success: false, error: { code: "messaging/registration-token-not-registered" } },
+        { success: false, error: { code: "messaging/internal-error" } },
+    ]);
+    strict_1.default.deepEqual(invalidTokens, ["stale-token"]);
+});
 //# sourceMappingURL=notifications.test.js.map

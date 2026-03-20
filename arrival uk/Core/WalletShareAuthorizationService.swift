@@ -13,13 +13,14 @@ struct WalletShareGrantToken: Codable, Hashable {
 
 enum WalletShareAuthorizationService {
     private static let signingKeyStorageKey = StorageKey.walletShareSigningKey.rawValue
+    static var testingSigningKeyProvider: (() -> SymmetricKey?)?
 
     static func issueToken(
         documentID: UUID,
         issuedBy: String,
         ttlSeconds: TimeInterval = 300,
         allowsSensitiveFields: Bool
-    ) -> WalletShareGrantToken {
+    ) -> WalletShareGrantToken? {
         let now = Date()
         let expiresAt = now.addingTimeInterval(max(30, ttlSeconds))
         let issuedAtMillis = epochMillis(now)
@@ -33,7 +34,9 @@ enum WalletShareAuthorizationService {
             nonce: nonce,
             allowsSensitiveFields: allowsSensitiveFields
         )
-        let signature = sign(canonical)
+        guard let signature = sign(canonical) else {
+            return nil
+        }
 
         return WalletShareGrantToken(
             documentID: documentID.uuidString,
@@ -64,7 +67,10 @@ enum WalletShareAuthorizationService {
             nonce: token.nonce,
             allowsSensitiveFields: token.allowsSensitiveFields
         )
-        return sign(canonical) == token.signature
+        guard let expectedSignature = sign(canonical) else {
+            return false
+        }
+        return expectedSignature == token.signature
     }
 
     static func encodeToken(_ token: WalletShareGrantToken) -> String? {
@@ -77,8 +83,10 @@ enum WalletShareAuthorizationService {
         return try? JSONDecoder().decode(WalletShareGrantToken.self, from: data)
     }
 
-    private static func sign(_ canonicalPayload: String) -> String {
-        let key = loadOrCreateSigningKey()
+    private static func sign(_ canonicalPayload: String) -> String? {
+        guard let key = loadOrCreateSigningKey() else {
+            return nil
+        }
         let digest = HMAC<SHA256>.authenticationCode(
             for: Data(canonicalPayload.utf8),
             using: key
@@ -86,7 +94,11 @@ enum WalletShareAuthorizationService {
         return Data(digest).base64EncodedString()
     }
 
-    private static func loadOrCreateSigningKey() -> SymmetricKey {
+    private static func loadOrCreateSigningKey() -> SymmetricKey? {
+        if let testingSigningKeyProvider {
+            return testingSigningKeyProvider()
+        }
+
         if let existing = KeychainManager.loadString(for: signingKeyStorageKey),
            let data = Data(base64Encoded: existing) {
             return SymmetricKey(data: data)
@@ -94,17 +106,14 @@ enum WalletShareAuthorizationService {
 
         var bytes = [UInt8](repeating: 0, count: 32)
         let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-        if status == errSecSuccess {
-            let data = Data(bytes)
-            _ = KeychainManager.saveString(data.base64EncodedString(), for: signingKeyStorageKey)
-            return SymmetricKey(data: data)
+        guard status == errSecSuccess else {
+            return nil
         }
 
-        // Deterministic fallback when secure random generation fails.
-        let fallbackSeed = "\(Bundle.main.bundleIdentifier ?? "com.arrivaluk.app"):\(UUID().uuidString)"
-        let digest = SHA256.hash(data: Data(fallbackSeed.utf8))
-        let data = Data(digest)
-        _ = KeychainManager.saveString(data.base64EncodedString(), for: signingKeyStorageKey)
+        let data = Data(bytes)
+        guard KeychainManager.saveString(data.base64EncodedString(), for: signingKeyStorageKey) else {
+            return nil
+        }
         return SymmetricKey(data: data)
     }
 

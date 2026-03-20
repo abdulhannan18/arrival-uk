@@ -1,11 +1,49 @@
 import Foundation
 
+private enum AppConfigurationRuntime {
+    static var testingOverrides: [String: String] = [:]
+
+    static func rawValue(for key: String) -> String? {
+        if let override = testingOverrides[key], !override.isEmpty {
+            return override
+        }
+
+        if let value = ProcessInfo.processInfo.environment[key], !value.isEmpty {
+            return value
+        }
+
+        if let value = Bundle.main.object(forInfoDictionaryKey: key) as? String, !value.isEmpty {
+            return value
+        }
+
+        return nil
+    }
+}
+
 enum AppEnvironment: String {
     case development
     case staging
     case production
 
+    init?(configurationValue: String) {
+        switch configurationValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "development", "dev", "debug":
+            self = .development
+        case "staging", "stage", "preprod", "pre-production":
+            self = .staging
+        case "production", "prod", "release":
+            self = .production
+        default:
+            return nil
+        }
+    }
+
     static var current: AppEnvironment {
+        if let override = AppConfigurationRuntime.rawValue(for: "ARRIVAL_APP_ENV"),
+           let resolved = AppEnvironment(configurationValue: override) {
+            return resolved
+        }
+
         #if DEBUG
         return .development
         #else
@@ -58,10 +96,9 @@ struct NetworkTrustConfiguration {
             return direct
         }
 
-        // Allow wildcard host entries like "*.arrivaluk.app".
         for (configuredHost, hashes) in pinnedCertificateHashesByHost {
             guard configuredHost.hasPrefix("*.") else { continue }
-            let suffix = String(configuredHost.dropFirst(1)) // ".arrivaluk.app"
+            let suffix = String(configuredHost.dropFirst(1))
             if normalizedHost.hasSuffix(suffix) {
                 return hashes
             }
@@ -89,16 +126,39 @@ struct NetworkTrustConfiguration {
 }
 
 enum AppConfig {
+    static func setTestingOverride(_ value: String?, for key: String) {
+        if let value {
+            AppConfigurationRuntime.testingOverrides[key] = value
+        } else {
+            AppConfigurationRuntime.testingOverrides.removeValue(forKey: key)
+        }
+    }
+
+    static func resetTestingOverrides() {
+        AppConfigurationRuntime.testingOverrides.removeAll()
+    }
+
     private static func environmentOverride(_ key: String) -> String? {
-        if let value = ProcessInfo.processInfo.environment[key], !value.isEmpty {
-            return value
-        }
+        AppConfigurationRuntime.rawValue(for: key)
+    }
 
-        if let value = Bundle.main.object(forInfoDictionaryKey: key) as? String, !value.isEmpty {
-            return value
-        }
+    private static func doubleOverride(_ key: String) -> Double? {
+        guard let raw = environmentOverride(key) else { return nil }
+        return Double(raw.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
 
-        return nil
+    private static func intOverride(_ key: String) -> Int? {
+        guard let raw = environmentOverride(key) else { return nil }
+        return Int(raw.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private static func stringSetOverride(_ key: String) -> Set<String> {
+        guard let raw = environmentOverride(key) else { return [] }
+        return Set(
+            raw.split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .filter { !$0.isEmpty }
+        )
     }
 
     private static func httpsURLOverride(_ key: String) -> URL? {
@@ -147,11 +207,31 @@ enum AppConfig {
         return apiBaseURL.appendingPathComponent("config.json")
     }
 
+    static var marketplacePaymentConfirmationURL: URL {
+        if let override = httpsURLOverride("ARRIVAL_MARKETPLACE_PAYMENT_CONFIRM_URL") {
+            return override
+        }
+
+        return apiBaseURL
+            .appendingPathComponent("v1")
+            .appendingPathComponent("marketplace")
+            .appendingPathComponent("payments")
+            .appendingPathComponent("confirm")
+    }
+
+    static var applePayMerchantID: String? {
+        let trimmed = environmentOverride("ARRIVAL_APPLE_PAY_MERCHANT_ID")?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmed, !trimmed.isEmpty else { return nil }
+        return trimmed
+    }
+
     static var collaborationWebSocketURL: URL? {
         if let override = environmentOverride("ARRIVAL_COLLAB_WS_URL") {
             let trimmed = override.trimmingCharacters(in: .whitespacesAndNewlines)
             if let parsed = URL(string: trimmed),
-               parsed.scheme?.lowercased() == "wss" || parsed.scheme?.lowercased() == "ws" {
+               let scheme = parsed.scheme?.lowercased(),
+               scheme == "wss" || (scheme == "ws" && environment == .development) {
                 return parsed
             }
         }
@@ -164,28 +244,96 @@ enum AppConfig {
         return components.url
     }
 
-    static let requestTimeout: TimeInterval = 30
-    static let resourceTimeout: TimeInterval = 60
-    static let maxNetworkRetries: Int = 3
+    static var requestTimeout: TimeInterval {
+        min(max(doubleOverride("ARRIVAL_REQUEST_TIMEOUT_SECONDS") ?? 30, 5), 120)
+    }
+
+    static var resourceTimeout: TimeInterval {
+        min(max(doubleOverride("ARRIVAL_RESOURCE_TIMEOUT_SECONDS") ?? 60, 10), 300)
+    }
+
+    static var maxNetworkRetries: Int {
+        min(max(intOverride("ARRIVAL_MAX_NETWORK_RETRIES") ?? 3, 0), 8)
+    }
+
+    static var marketplaceAllowedProviderHosts: Set<String> {
+        let configured = stringSetOverride("ARRIVAL_ALLOWED_MARKETPLACE_HOSTS")
+        if !configured.isEmpty {
+            return configured
+        }
+
+        switch environment {
+        case .development:
+            return []
+        case .staging, .production:
+            return [
+                "arrivaluk.app",
+                "www.arrivaluk.app",
+                "api.arrivaluk.app",
+                "*.arrivaluk.app",
+                "*.arrival.com"
+            ]
+        }
+    }
+
+    static func isAllowedMarketplaceProviderHost(_ host: String) -> Bool {
+        let normalizedHost = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedHost.isEmpty else { return false }
+
+        let allowlist = marketplaceAllowedProviderHosts
+        if allowlist.isEmpty {
+            return environment == .development
+        }
+
+        if allowlist.contains(normalizedHost) {
+            return true
+        }
+
+        for configuredHost in allowlist where configuredHost.hasPrefix("*.") {
+            let suffix = String(configuredHost.dropFirst(1))
+            if normalizedHost.hasSuffix(suffix) {
+                return true
+            }
+        }
+
+        return false
+    }
+
     static let launchWatchdogDelayNanoseconds: UInt64 = 1_500_000_000
     static let progressPersistDebounceNanoseconds: UInt64 = 350_000_000
     static let crashReportingEnabled = true
     static var networkTrust: NetworkTrustConfiguration {
         let googleCertificatePins: Set<String> = [
-            // Google Trust Services WR2 intermediate
             "5v4iv0Xk8NO4XFngLA9JVBjh640yEPeI1IzV4ctUfNQ=",
-            // Google Trust Services GTS Root R1
             "PuAnjfcfo8ElxM1IfwHXdGlOb8V+DNlMJO/XaRM5GOU="
         ]
+        let firstPartyPins = stringSetOverride("ARRIVAL_API_PINNED_SPKI_HASHES")
+        if environment == .production && firstPartyPins.isEmpty {
+            fatalError("Missing ARRIVAL_API_PINNED_SPKI_HASHES for production network pinning.")
+        }
 
-        return NetworkTrustConfiguration(
-            enforcePinning: environment == .production,
-            // Only allow unknown hosts in non-production. Production should use pinning or explicit allow-list.
-            allowUnpinnedHosts: environment != .production,
-            pinnedCertificateHashesByHost: [
-                "*.googleapis.com": googleCertificatePins
-            ],
-            explicitlyAllowedUnpinnedHosts: [
+        var pinnedHashesByHost: [String: Set<String>] = [
+            "*.googleapis.com": googleCertificatePins
+        ]
+        if !firstPartyPins.isEmpty {
+            pinnedHashesByHost["api.arrivaluk.app"] = firstPartyPins
+            pinnedHashesByHost["api-dev.arrivaluk.app"] = firstPartyPins
+            pinnedHashesByHost["api-staging.arrivaluk.app"] = firstPartyPins
+            pinnedHashesByHost["api.uk.arrival.com"] = firstPartyPins
+            pinnedHashesByHost["api.us.arrival.com"] = firstPartyPins
+            pinnedHashesByHost["api.ca.arrival.com"] = firstPartyPins
+            pinnedHashesByHost["api.au.arrival.com"] = firstPartyPins
+            pinnedHashesByHost["api.global.arrival.com"] = firstPartyPins
+            pinnedHashesByHost["*.arrivaluk.app"] = firstPartyPins
+            pinnedHashesByHost["*.arrival.com"] = firstPartyPins
+        }
+
+        var explicitlyAllowedUnpinnedHosts: Set<String> = [
+            "*.cloudfunctions.net",
+            "*.firebaseio.com"
+        ]
+        if environment != .production && firstPartyPins.isEmpty {
+            explicitlyAllowedUnpinnedHosts.formUnion([
                 "api.arrivaluk.app",
                 "api-dev.arrivaluk.app",
                 "api-staging.arrivaluk.app",
@@ -195,13 +343,15 @@ enum AppConfig {
                 "api.au.arrival.com",
                 "api.global.arrival.com",
                 "*.arrivaluk.app",
-                "*.arrival.com",
-                // Firebase SDK networking does not route through `SecureHTTPClient`/URLSessionDelegate
-                // pin evaluation. We explicitly allow these hosts and rely on App Check + Firebase
-                // Security Rules as compensating controls.
-                "*.cloudfunctions.net",
-                "*.firebaseio.com"
-            ]
+                "*.arrival.com"
+            ])
+        }
+
+        return NetworkTrustConfiguration(
+            enforcePinning: environment == .production,
+            allowUnpinnedHosts: environment != .production,
+            pinnedCertificateHashesByHost: pinnedHashesByHost,
+            explicitlyAllowedUnpinnedHosts: explicitlyAllowedUnpinnedHosts
         )
     }
 

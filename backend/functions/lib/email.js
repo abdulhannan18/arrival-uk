@@ -41,6 +41,7 @@ const sanitization_1 = require("./utils/sanitization");
 const privileged_1 = require("./utils/privileged");
 const rateLimit_1 = require("./utils/rateLimit");
 const appCheck_1 = require("./utils/appCheck");
+const constants_1 = require("./constants");
 if (admin.apps.length === 0) {
     admin.initializeApp();
 }
@@ -60,6 +61,7 @@ const ALLOWED_CUSTOM_EMAIL_TEMPLATES = new Set([
 ]);
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const FIREBASE_UID_PATTERN = /^[A-Za-z0-9:_-]{6,128}$/;
+const WEEKLY_DIGEST_EMAIL_TYPE = "weekly_digest";
 let didWarnInvalidFromEmail = false;
 let didWarnInvalidAppURL = false;
 let didWarnMissingUnsubscribeSecret = false;
@@ -145,9 +147,9 @@ function base64Url(buffer) {
         .replace(/\//g, "_")
         .replace(/=+$/g, "");
 }
-function signUnsubscribePayload(secret, userId, issuedAtMs) {
+function signUnsubscribePayload(secret, userId, emailType, issuedAtMs) {
     const digest = (0, crypto_1.createHmac)("sha256", secret)
-        .update(`${userId}.${issuedAtMs}`)
+        .update(`${userId}.${emailType}.${issuedAtMs}`)
         .digest();
     return base64Url(digest);
 }
@@ -166,17 +168,20 @@ function buildWeeklyDigestUnsubscribeURL(userId, nowMs = Date.now()) {
     if (!FIREBASE_UID_PATTERN.test(userId))
         return null;
     const issuedAtMs = Math.floor(nowMs);
-    const signature = signUnsubscribePayload(secret, userId, issuedAtMs);
+    const signature = signUnsubscribePayload(secret, userId, WEEKLY_DIGEST_EMAIL_TYPE, issuedAtMs);
     const url = new URL(unsubscribeBaseURL());
     url.searchParams.set("uid", userId);
+    url.searchParams.set("type", WEEKLY_DIGEST_EMAIL_TYPE);
     url.searchParams.set("ts", String(issuedAtMs));
     url.searchParams.set("sig", signature);
     return url.toString();
 }
-function isValidUnsubscribeRequest(userId, issuedAtRaw, signature, nowMs = Date.now(), secret = unsubscribeSecret()) {
+function isValidUnsubscribeRequest(userId, emailType, issuedAtRaw, signature, nowMs = Date.now(), secret = unsubscribeSecret()) {
     if (!secret)
         return false;
     if (!FIREBASE_UID_PATTERN.test(userId))
+        return false;
+    if (emailType !== WEEKLY_DIGEST_EMAIL_TYPE)
         return false;
     if (!signature || signature.length < 24 || signature.length > 128)
         return false;
@@ -186,8 +191,96 @@ function isValidUnsubscribeRequest(userId, issuedAtRaw, signature, nowMs = Date.
     const ageMs = nowMs - issuedAtMs;
     if (ageMs < 0 || ageMs > MAX_UNSUBSCRIBE_LINK_AGE_MS)
         return false;
-    const expectedSignature = signUnsubscribePayload(secret, userId, issuedAtMs);
+    const expectedSignature = signUnsubscribePayload(secret, userId, emailType, issuedAtMs);
     return safeCompare(signature, expectedSignature);
+}
+function requestParameter(request, key) {
+    const bodyValue = request.body && typeof request.body === "object" && !Array.isArray(request.body)
+        ? safeString(request.body[key])
+        : "";
+    if (bodyValue)
+        return bodyValue;
+    return safeString(request.query[key]);
+}
+function renderWeeklyDigestUnsubscribeConfirmation(userId, emailType, issuedAt, signature) {
+    return `
+    <html>
+      <body style="font-family:-apple-system,Arial,sans-serif;padding:24px;color:#111827;">
+        <h2>Confirm unsubscribe</h2>
+        <p>This link is for weekly digest emails only. Confirm below if you want to stop receiving them.</p>
+        <form method="POST">
+          <input type="hidden" name="uid" value="${(0, sanitization_1.escapeHtml)(userId)}" />
+          <input type="hidden" name="type" value="${(0, sanitization_1.escapeHtml)(emailType)}" />
+          <input type="hidden" name="ts" value="${(0, sanitization_1.escapeHtml)(issuedAt)}" />
+          <input type="hidden" name="sig" value="${(0, sanitization_1.escapeHtml)(signature)}" />
+          <button type="submit" style="padding:10px 16px;border-radius:8px;background:#111827;color:#fff;border:none;">Unsubscribe</button>
+        </form>
+      </body>
+    </html>
+  `.trim();
+}
+function renderWeeklyDigestUnsubscribeSuccess() {
+    return `
+    <html>
+      <body style="font-family:-apple-system,Arial,sans-serif;padding:24px;color:#111827;">
+        <h2>Unsubscribed</h2>
+        <p>You will no longer receive weekly digest emails from Arrival UK.</p>
+        <p>If this was a mistake, you can re-enable digest emails in app settings.</p>
+      </body>
+    </html>
+  `.trim();
+}
+function weeklyDigestWindowKey(now = new Date()) {
+    const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const day = date.getUTCDay() || 7;
+    date.setUTCDate(date.getUTCDate() + 4 - day);
+    const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+    const week = Math.ceil((((date.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+    return `${date.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+function weeklyDigestIdempotencyKey(userId, windowKey) {
+    return (0, crypto_1.createHash)("sha256")
+        .update(`${WEEKLY_DIGEST_EMAIL_TYPE}:${userId}:${windowKey}`)
+        .digest("hex");
+}
+function digestReservationAction(existingStatus) {
+    if (!existingStatus || existingStatus === "failed") {
+        return "reserve";
+    }
+    return "skip";
+}
+function digestSendCollectionRef() {
+    return db.collection(constants_1.Collections.ops.root)
+        .doc(constants_1.Collections.ops.emailDigestSends)
+        .collection(constants_1.Collections.ops.items);
+}
+async function reserveWeeklyDigestSend(userId, windowKey) {
+    const idempotencyKey = weeklyDigestIdempotencyKey(userId, windowKey);
+    const reservationRef = digestSendCollectionRef().doc(idempotencyKey);
+    return db.runTransaction(async (transaction) => {
+        const snapshot = await transaction.get(reservationRef);
+        const existingStatus = safeString(snapshot.data()?.status);
+        const action = digestReservationAction(existingStatus || null);
+        if (action === "skip") {
+            return { shouldSend: false, idempotencyKey };
+        }
+        transaction.set(reservationRef, {
+            userId,
+            emailType: WEEKLY_DIGEST_EMAIL_TYPE,
+            windowKey,
+            status: "reserved",
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            lastError: admin.firestore.FieldValue.delete(),
+        }, { merge: true });
+        return { shouldSend: true, idempotencyKey };
+    });
+}
+async function markWeeklyDigestSendResult(idempotencyKey, status, errorMessage) {
+    await digestSendCollectionRef().doc(idempotencyKey).set({
+        status,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        lastError: errorMessage ? errorMessage.slice(0, 240) : admin.firestore.FieldValue.delete(),
+    }, { merge: true });
 }
 function extractEmailDomain(email) {
     const atIndex = email.lastIndexOf("@");
@@ -331,6 +424,7 @@ exports.sendWeeklyDigestEmail = emailRuntime.pubsub
     .schedule("every monday 09:00")
     .timeZone("Europe/London")
     .onRun(async () => {
+    const windowKey = weeklyDigestWindowKey(new Date());
     const maxConcurrentSends = 12;
     const pageSize = 300;
     let lastDoc;
@@ -368,6 +462,10 @@ exports.sendWeeklyDigestEmail = emailRuntime.pubsub
             const safeAppURL = sanitizeURL(appURL());
             const unsubscribeURL = buildWeeklyDigestUnsubscribeURL(userDoc.id);
             const safeUnsubscribeURL = sanitizeURL(unsubscribeURL ?? `${appURL()}/settings/notifications`);
+            const reservation = await reserveWeeklyDigestSend(userDoc.id, windowKey);
+            if (!reservation.shouldSend) {
+                continue;
+            }
             const html = `
         <div style="font-family:-apple-system,Arial,sans-serif;line-height:1.5;color:#111827;">
           <h2>Your Weekly Progress</h2>
@@ -393,12 +491,15 @@ exports.sendWeeklyDigestEmail = emailRuntime.pubsub
                             }
                             : undefined,
                     });
+                    await markWeeklyDigestSendResult(reservation.idempotencyKey, "sent");
                 }
                 catch (error) {
+                    const message = error instanceof Error ? error.message : "unknown_error";
+                    await markWeeklyDigestSendResult(reservation.idempotencyKey, "failed", message);
                     functions.logger.error("Failed to send weekly digest", {
                         userId: userDoc.id,
                         toDomain: extractEmailDomain(to),
-                        error: error instanceof Error ? error.message : "unknown_error",
+                        error: message,
                     });
                 }
             })());
@@ -510,11 +611,19 @@ exports.unsubscribeWeeklyDigest = emailRuntime.https.onRequest(async (request, r
         response.status(405).send("Method not allowed");
         return;
     }
-    const userId = safeString(request.query.uid);
-    const issuedAt = safeString(request.query.ts);
-    const signature = safeString(request.query.sig);
-    if (!isValidUnsubscribeRequest(userId, issuedAt, signature)) {
+    const userId = requestParameter(request, "uid");
+    const emailType = requestParameter(request, "type");
+    const issuedAt = requestParameter(request, "ts");
+    const signature = requestParameter(request, "sig");
+    if (!isValidUnsubscribeRequest(userId, emailType, issuedAt, signature)) {
         response.status(400).send("Invalid or expired unsubscribe link.");
+        return;
+    }
+    if (request.method === "GET") {
+        response
+            .status(200)
+            .setHeader("Content-Type", "text/html; charset=utf-8")
+            .send(renderWeeklyDigestUnsubscribeConfirmation(userId, emailType, issuedAt, signature));
         return;
     }
     try {
@@ -531,15 +640,7 @@ exports.unsubscribeWeeklyDigest = emailRuntime.https.onRequest(async (request, r
         response
             .status(200)
             .setHeader("Content-Type", "text/html; charset=utf-8")
-            .send(`
-        <html>
-          <body style="font-family:-apple-system,Arial,sans-serif;padding:24px;color:#111827;">
-            <h2>Unsubscribed</h2>
-            <p>You will no longer receive weekly digest emails from Arrival UK.</p>
-            <p>If this was a mistake, you can re-enable digest emails in app settings.</p>
-          </body>
-        </html>
-      `.trim());
+            .send(renderWeeklyDigestUnsubscribeSuccess());
     }
     catch (error) {
         functions.logger.error("Failed to unsubscribe weekly digest", {
@@ -557,5 +658,10 @@ exports.__private__ = {
     buildWeeklyDigestUnsubscribeURL,
     isValidUnsubscribeRequest,
     signUnsubscribePayload,
+    renderWeeklyDigestUnsubscribeConfirmation,
+    weeklyDigestWindowKey,
+    weeklyDigestIdempotencyKey,
+    digestReservationAction,
+    WEEKLY_DIGEST_EMAIL_TYPE,
 };
 //# sourceMappingURL=email.js.map

@@ -302,6 +302,7 @@ extension MarketplaceProviderDescriptor {
         case completionTaskID = "completion_task_id"
         case completionCategoryID = "completion_category_id"
         case paymentMode = "payment_mode"
+        case paymentProductID = "payment_product_id"
         case priceGBP = "price_gbp"
         case discoveryTag = "discovery_tag"
         case supportedRegions = "supported_regions"
@@ -320,6 +321,7 @@ extension MarketplaceProviderDescriptor {
         let completionTaskID = try container.decodeIfPresent(String.self, forKey: .completionTaskID)
         let completionCategoryID = try container.decodeIfPresent(String.self, forKey: .completionCategoryID)
         let paymentModeRaw = try container.decodeIfPresent(String.self, forKey: .paymentMode) ?? MarketplacePaymentMode.none.rawValue
+        let paymentProductID = try container.decodeIfPresent(String.self, forKey: .paymentProductID)
         let priceGBP = try container.decodeIfPresent(Decimal.self, forKey: .priceGBP)
         let discoveryTag = try container.decodeIfPresent(String.self, forKey: .discoveryTag)
         let supportedRegionsRaw = try container.decodeIfPresent([String].self, forKey: .supportedRegions) ?? []
@@ -341,6 +343,7 @@ extension MarketplaceProviderDescriptor {
             completionTaskID: completionTaskID,
             completionCategoryID: completionCategoryID,
             paymentMode: MarketplacePaymentMode(rawValue: paymentModeRaw) ?? .none,
+            paymentProductID: paymentProductID,
             priceGBP: priceGBP,
             discoveryTag: discoveryTag,
             supportedRegions: supportedRegions
@@ -360,6 +363,7 @@ extension MarketplaceProviderDescriptor {
         try container.encodeIfPresent(completionTaskID, forKey: .completionTaskID)
         try container.encodeIfPresent(completionCategoryID, forKey: .completionCategoryID)
         try container.encode(paymentMode.rawValue, forKey: .paymentMode)
+        try container.encodeIfPresent(paymentProductID, forKey: .paymentProductID)
         try container.encodeIfPresent(priceGBP, forKey: .priceGBP)
         try container.encodeIfPresent(discoveryTag, forKey: .discoveryTag)
         try container.encode(supportedRegions.map(\.rawValue), forKey: .supportedRegions)
