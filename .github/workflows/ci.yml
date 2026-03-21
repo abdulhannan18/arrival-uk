@@ -111,9 +111,11 @@ jobs:
 
       - name: Resolve Swift packages
         run: |
+          mkdir -p "$HOME/Library/Caches/arrivaluk-source-packages"
           xcodebuild \
             -project "arrival uk.xcodeproj" \
             -scheme "arrival uk" \
+            -clonedSourcePackagesDirPath "$HOME/Library/Caches/arrivaluk-source-packages" \
             -resolvePackageDependencies
 
       - name: Pick simulator
@@ -142,6 +144,8 @@ jobs:
             -project "arrival uk.xcodeproj" \
             -scheme "arrival uk" \
             -destination "platform=iOS Simulator,name=${{ steps.pick_sim.outputs.sim_name }}" \
+            -clonedSourcePackagesDirPath "$HOME/Library/Caches/arrivaluk-source-packages" \
+            -disableAutomaticPackageResolution \
             CODE_SIGNING_ALLOWED=NO \
             build
 
@@ -156,6 +160,8 @@ jobs:
             -maximum-parallel-testing-workers 1 \
             -resultBundlePath /tmp/arrivaluk-tests.xcresult \
             -enableCodeCoverage YES \
+            -clonedSourcePackagesDirPath "$HOME/Library/Caches/arrivaluk-source-packages" \
+            -disableAutomaticPackageResolution \
             CODE_SIGNING_ALLOWED=NO \
             test
 
@@ -168,6 +174,8 @@ jobs:
             -project "arrival uk.xcodeproj" \
             -scheme "arrival uk" \
             -destination "platform=iOS Simulator,name=${{ steps.pick_sim.outputs.sim_name }}" \
+            -clonedSourcePackagesDirPath "$HOME/Library/Caches/arrivaluk-source-packages" \
+            -disableAutomaticPackageResolution \
             CODE_SIGNING_ALLOWED=NO \
             analyze
 

@@ -293,15 +293,27 @@ enum AppConfig {
             let trimmed = override.trimmingCharacters(in: .whitespacesAndNewlines)
             if let parsed = URL(string: trimmed),
                let scheme = parsed.scheme?.lowercased() {
-                #if DEBUG
-                if scheme == "wss" || scheme == "ws" {
-                    return parsed
+                switch environment {
+                case .development:
+                    if scheme == "wss" || scheme == "ws" {
+                        return parsed
+                    }
+                case .staging, .production:
+                    if scheme == "wss" {
+                        return parsed
+                    }
+
+                    if let derived = derivedCollaborationWebSocketURL(from: apiBaseURL),
+                       derived.scheme?.lowercased() == "wss" {
+                        #if DEBUG
+                        logDebugConfigurationFallback(
+                            for: "ARRIVAL_COLLAB_WS_URL",
+                            stubDescription: derived.absoluteString
+                        )
+                        #endif
+                        return derived
+                    }
                 }
-                #else
-                if scheme == "wss" {
-                    return parsed
-                }
-                #endif
             }
         }
 
