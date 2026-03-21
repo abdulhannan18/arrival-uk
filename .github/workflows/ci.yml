@@ -26,7 +26,36 @@ jobs:
           cache-dependency-path: backend/functions/package-lock.json
 
       - name: Install deps
-        run: npm ci
+        run: |
+          set -euo pipefail
+          attempts=3
+          delay_seconds=2
+
+          for attempt in $(seq 1 "$attempts"); do
+            set +e
+            npm ci --no-audit --no-fund > /tmp/npm-ci.log 2>&1
+            status=$?
+            set -e
+
+            cat /tmp/npm-ci.log
+
+            if [ "$status" -eq 0 ]; then
+              echo "npm ci passed."
+              exit 0
+            fi
+
+            if grep -qiE "ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|503 Service Unavailable|504 Gateway Timeout|network timeout|fetch failed" /tmp/npm-ci.log; then
+              if [ "$attempt" -lt "$attempts" ]; then
+                echo "Transient npm install failure (attempt ${attempt}/${attempts}); retrying in ${delay_seconds}s..."
+                sleep "$delay_seconds"
+                delay_seconds=$((delay_seconds * 2))
+                continue
+              fi
+            fi
+
+            echo "npm ci failed."
+            exit "$status"
+          done
 
       - name: Repository quality gate
         working-directory: ${{ github.workspace }}
@@ -111,12 +140,43 @@ jobs:
 
       - name: Resolve Swift packages
         run: |
-          mkdir -p "$HOME/Library/Caches/arrivaluk-source-packages"
-          xcodebuild \
-            -project "arrival uk.xcodeproj" \
-            -scheme "arrival uk" \
-            -clonedSourcePackagesDirPath "$HOME/Library/Caches/arrivaluk-source-packages" \
-            -resolvePackageDependencies
+          set -euo pipefail
+          attempts=3
+          delay_seconds=5
+          packages_dir="$HOME/Library/Caches/arrivaluk-source-packages"
+
+          for attempt in $(seq 1 "$attempts"); do
+            mkdir -p "$packages_dir"
+
+            set +e
+            xcodebuild \
+              -project "arrival uk.xcodeproj" \
+              -scheme "arrival uk" \
+              -clonedSourcePackagesDirPath "$packages_dir" \
+              -resolvePackageDependencies > /tmp/arrivaluk-resolve-packages.log 2>&1
+            status=$?
+            set -e
+
+            cat /tmp/arrivaluk-resolve-packages.log
+
+            if [ "$status" -eq 0 ]; then
+              echo "Swift package resolution passed."
+              exit 0
+            fi
+
+            if grep -qiE "RPC failed|early EOF|Connection reset by peer|Could not resolve host|network connection was lost|Operation timed out|timed out|502 Bad Gateway|503 Service Unavailable|504 Gateway Timeout|failed to clone" /tmp/arrivaluk-resolve-packages.log; then
+              if [ "$attempt" -lt "$attempts" ]; then
+                echo "Transient Swift package resolution failure (attempt ${attempt}/${attempts}); retrying in ${delay_seconds}s..."
+                rm -rf "$packages_dir"
+                sleep "$delay_seconds"
+                delay_seconds=$((delay_seconds * 2))
+                continue
+              fi
+            fi
+
+            echo "Swift package resolution failed."
+            exit "$status"
+          done
 
       - name: Pick simulator
         id: pick_sim
