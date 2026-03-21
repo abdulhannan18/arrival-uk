@@ -147,6 +147,7 @@ final class CollaborationSyncEngine {
 
     private let defaults: UserDefaults
     private let transport: any CollaborationRealtimeTransport
+    private let realtimeEnabled: Bool
     private let websocketURL: URL?
     private let nowProvider: @Sendable () -> Date
     private let sleepProvider: @Sendable (TimeInterval) async -> Void
@@ -195,6 +196,7 @@ final class CollaborationSyncEngine {
         defaults: UserDefaults = .standard,
         transport: (any CollaborationRealtimeTransport)? = nil,
         websocketURL: URL? = nil,
+        realtimeEnabled: Bool? = nil,
         nowProvider: @escaping @Sendable () -> Date = Date.init,
         sleepProvider: @escaping @Sendable (TimeInterval) async -> Void = { delay in
             let nanoseconds = UInt64(max(0, delay) * 1_000_000_000)
@@ -206,9 +208,12 @@ final class CollaborationSyncEngine {
         notificationCenter: NotificationCenter = .default,
         maximumReconnectAttempts: Int = 10
     ) {
+        let resolvedRealtimeEnabled = realtimeEnabled ?? AppConfig.collaborationRealtimeEnabled
+
         self.defaults = defaults
         self.transport = transport ?? CollaborationWebSocketTransport()
-        self.websocketURL = websocketURL ?? AppConfig.collaborationWebSocketURL
+        self.realtimeEnabled = resolvedRealtimeEnabled
+        self.websocketURL = websocketURL ?? (resolvedRealtimeEnabled ? AppConfig.collaborationWebSocketURL : nil)
         self.nowProvider = nowProvider
         self.sleepProvider = sleepProvider
         self.jitterProvider = jitterProvider
@@ -226,7 +231,12 @@ final class CollaborationSyncEngine {
 
         let persistedJourneyID = defaults.string(forKey: journeyIDKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedJourneyID = (persistedJourneyID?.isEmpty == false) ? persistedJourneyID! : "default-journey"
+        let resolvedJourneyID = {
+            guard let persistedJourneyID, !persistedJourneyID.isEmpty else {
+                return "default-journey"
+            }
+            return persistedJourneyID
+        }()
 
         let persistedRooms = Self.decodePersistedRooms(from: defaults.data(forKey: roomStateKey))
         let persistedActiveRooms = Set(
@@ -262,6 +272,10 @@ final class CollaborationSyncEngine {
     func configureIfNeeded() {
         guard !hasConfigured else { return }
         hasConfigured = true
+        guard realtimeEnabled else {
+            connectionState = .failed(reason: "collaboration_realtime_disabled")
+            return
+        }
 
         foregroundObserver = notificationCenter.addObserver(
             forName: UIApplication.willEnterForegroundNotification,
@@ -295,6 +309,7 @@ final class CollaborationSyncEngine {
         ensureRoomStateExists(for: normalized)
         activeRoomIDs.insert(normalized)
         persistRoomMembership()
+        guard realtimeEnabled else { return }
 
         if hasConfigured {
             Task { @MainActor in
@@ -357,6 +372,7 @@ final class CollaborationSyncEngine {
         }
 
         defaults.set(nowProvider(), forKey: heartbeatKey)
+        guard realtimeEnabled else { return }
 
         if isActive {
             startPresenceHeartbeatIfNeeded()
@@ -374,6 +390,7 @@ final class CollaborationSyncEngine {
 
     func publishViewing(taskID: String?) {
         localViewingTaskID = taskID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard realtimeEnabled else { return }
         Task { @MainActor in
             await sendCurrentPresence()
         }
@@ -547,6 +564,11 @@ final class CollaborationSyncEngine {
     }
 
     private func connectRealtimeChannelIfNeeded(forceReconnect: Bool) async {
+        guard realtimeEnabled else {
+            connectionState = .failed(reason: "collaboration_realtime_disabled")
+            return
+        }
+
         if !forceReconnect {
             switch connectionState {
             case .connecting, .connected, .reconnecting:
@@ -1019,6 +1041,7 @@ final class CollaborationSyncEngine {
     }
 
     private func handleWillEnterForeground() async {
+        guard realtimeEnabled else { return }
         switch connectionState {
         case .disconnected, .failed:
             await connectRealtimeChannelIfNeeded(forceReconnect: true)

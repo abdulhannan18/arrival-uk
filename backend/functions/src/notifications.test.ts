@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import * as admin from "firebase-admin";
 import { __private__ } from "./notifications";
 
 test("normalizedPlatform accepts allowed values case-insensitively", () => {
@@ -55,20 +56,31 @@ test("parseTimingToDays supports week/month timing variants", () => {
 });
 
 test("notification dropped on error path is logged", () => {
-  const payload = __private__.buildNotificationAttemptLog(
-    "notif_123",
-    "user_123",
-    "task_reminder",
-    "failure",
-    "messaging/internal-error"
-  );
+  const previousKey = process.env.LOG_PSEUDONYMIZATION_KEY;
+  process.env.LOG_PSEUDONYMIZATION_KEY = "test-log-key";
 
-  assert.equal(payload.notificationId, "notif_123");
-  assert.equal(payload.userId, "user_123");
-  assert.equal(payload.type, "task_reminder");
-  assert.equal(payload.channel, "push");
-  assert.equal(payload.result, "failure");
-  assert.equal(payload.error, "messaging/internal-error");
+  try {
+    const payload = __private__.buildNotificationAttemptLog(
+      "notif_123",
+      "user_123",
+      "task_reminder",
+      "failure",
+      "messaging/internal-error"
+    );
+
+    assert.equal(payload.type, "task_reminder");
+    assert.equal(payload.channel, "push");
+    assert.equal(payload.result, "failure");
+    assert.equal(payload.error, "messaging/internal-error");
+    assert.match(String(payload.notificationRef), /^notif:[0-9a-f]{12}$/);
+    assert.match(String(payload.userRef), /^uid:[0-9a-f]{12}$/);
+  } finally {
+    if (previousKey === undefined) {
+      delete process.env.LOG_PSEUDONYMIZATION_KEY;
+    } else {
+      process.env.LOG_PSEUDONYMIZATION_KEY = previousKey;
+    }
+  }
 });
 
 test("duplicate notification blocked by idempotency key", () => {
@@ -92,4 +104,128 @@ test("stale push token removed on invalid registration", () => {
   );
 
   assert.deepEqual(invalidTokens, ["stale-token"]);
+});
+
+
+test("log output does not contain raw user id", () => {
+  const previousKey = process.env.LOG_PSEUDONYMIZATION_KEY;
+  process.env.LOG_PSEUDONYMIZATION_KEY = "test-log-key";
+
+  try {
+    const payload = __private__.buildNotificationAttemptLog(
+      "notif_123",
+      "user_123",
+      "task_reminder",
+      "failure",
+      "messaging/internal-error"
+    );
+
+    const serialized = JSON.stringify(payload);
+    assert.equal(serialized.includes("user_123"), false);
+    assert.equal(serialized.includes("notif_123"), false);
+    assert.match(serialized, /uid:[0-9a-f]{12}/);
+    assert.match(serialized, /notif:[0-9a-f]{12}/);
+  } finally {
+    if (previousKey === undefined) {
+      delete process.env.LOG_PSEUDONYMIZATION_KEY;
+    } else {
+      process.env.LOG_PSEUDONYMIZATION_KEY = previousKey;
+    }
+  }
+});
+
+test("dead letter written after max retries", async () => {
+  const previousKey = process.env.LOG_PSEUDONYMIZATION_KEY;
+  process.env.LOG_PSEUDONYMIZATION_KEY = "test-log-key";
+
+  try {
+    const updates: Record<string, unknown>[] = [];
+    let capturedID = "";
+    let capturedRecord: Record<string, unknown> | undefined;
+    const firstAttemptAt = admin.firestore.Timestamp.fromDate(new Date("2026-03-20T09:00:00.000Z"));
+    const deadLetteredAt = admin.firestore.Timestamp.fromDate(new Date("2026-03-20T12:00:00.000Z"));
+
+    await __private__.persistTerminalNotificationFailure(
+      {
+        update: async (payload: Record<string, unknown>) => {
+          updates.push(payload);
+        },
+      },
+      "notif_123",
+      {
+        userId: "user_123",
+        type: "task_reminder",
+        title: "Task reminder",
+        body: "Bring your passport.",
+        data: { type: "task_reminder", taskId: "task_123" },
+        scheduledFor: firstAttemptAt,
+        sent: false,
+      },
+      5,
+      "messaging/internal-error",
+      "messaging/internal-error",
+      {
+        doc: (id: string) => ({
+          set: async (record: Record<string, unknown>) => {
+            capturedID = id;
+            capturedRecord = record;
+          },
+        }),
+      },
+      deadLetteredAt
+    );
+
+    assert.equal(updates.length, 1);
+    assert.equal(capturedID, "notif_123");
+    assert.equal(capturedRecord?.notificationId, "notif_123");
+    assert.equal(capturedRecord?.notificationType, "task_reminder");
+    assert.equal(capturedRecord?.attemptCount, 5);
+    assert.equal(capturedRecord?.failureCode, "messaging/internal-error");
+    assert.equal(capturedRecord?.failureReason, "messaging/internal-error");
+    assert.equal(capturedRecord?.deadLetteredAt, deadLetteredAt);
+    assert.equal(capturedRecord?.firstAttemptAt, firstAttemptAt);
+    assert.equal(String(capturedRecord?.userId).includes("user_123"), false);
+    assert.match(String(capturedRecord?.userId), /^uid:[0-9a-f]{12}$/);
+  } finally {
+    if (previousKey === undefined) {
+      delete process.env.LOG_PSEUDONYMIZATION_KEY;
+    } else {
+      process.env.LOG_PSEUDONYMIZATION_KEY = previousKey;
+    }
+  }
+});
+
+test("dead letter write failure does not throw", async () => {
+  let updateCalls = 0;
+
+  await __private__.persistTerminalNotificationFailure(
+    {
+      update: async () => {
+        updateCalls += 1;
+      },
+    },
+    "notif_123",
+    {
+      userId: "user_123",
+      type: "task_reminder",
+      title: "Task reminder",
+      body: "Bring your passport.",
+      data: { type: "task_reminder", taskId: "task_123" },
+      scheduledFor: admin.firestore.Timestamp.fromDate(new Date("2026-03-20T09:00:00.000Z")),
+      sent: false,
+    },
+    5,
+    "messaging/internal-error",
+    "messaging/internal-error",
+    {
+      doc: () => ({
+        set: async () => {
+          throw new Error("firestore unavailable");
+        },
+      }),
+    },
+    admin.firestore.Timestamp.fromDate(new Date("2026-03-20T12:00:00.000Z"))
+  );
+
+  assert.equal(updateCalls, 1);
 });

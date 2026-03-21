@@ -15,6 +15,7 @@ struct arrival_ukApp: App {
 
     init() {
         CrashReporter.bootstrapIfNeeded()
+        AppConfig.validateRequiredConfiguration()
         ConfigService.shared.configureIfNeeded()
         PerformanceMonitor.shared.bootstrapIfNeeded()
         if #available(iOS 17.0, *) {

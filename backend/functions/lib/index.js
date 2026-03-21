@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.cleanupUserStorage = exports.processProfilePicture = exports.addSupportTicketMessage = exports.createSupportTicket = exports.sendSMSReminder = exports.sendCustomEmail = exports.sendSupportTicketConfirmation = exports.unsubscribeWeeklyDigest = exports.sendWeeklyDigestEmail = exports.sendWelcomeEmailOnSignup = exports.marketplacePaymentConfirm = exports.taskSync = exports.unregisterDeviceToken = exports.registerDeviceToken = exports.sendQueuedNotifications = exports.scheduleTaskNotifications = exports.retryFailedUserCleanup = exports.pruneExpiredAnalyticsEvents = exports.verifyUser = exports.recordAnalyticsEvent = exports.trackLogin = exports.onUserDelete = exports.onUserCreate = void 0;
+exports.cleanupUserStorage = exports.processProfilePicture = exports.addSupportTicketMessage = exports.createSupportTicket = exports.sendSMSReminder = exports.sendCustomEmail = exports.sendSupportTicketConfirmation = exports.unsubscribeWeeklyDigest = exports.sendWeeklyDigestEmail = exports.sendWelcomeEmailOnSignup = exports.marketplacePaymentConfirm = exports.taskSync = exports.unregisterDeviceToken = exports.registerDeviceToken = exports.scanNotificationDeadLetterBacklog = exports.sendQueuedNotifications = exports.scheduleTaskNotifications = exports.retryFailedUserCleanup = exports.pruneExpiredAnalyticsEvents = exports.verifyUser = exports.recordAnalyticsEvent = exports.trackLogin = exports.onUserDelete = exports.onUserCreate = void 0;
 var auth_1 = require("./auth");
 Object.defineProperty(exports, "onUserCreate", { enumerable: true, get: function () { return auth_1.onUserCreate; } });
 Object.defineProperty(exports, "onUserDelete", { enumerable: true, get: function () { return auth_1.onUserDelete; } });
@@ -12,6 +12,7 @@ Object.defineProperty(exports, "retryFailedUserCleanup", { enumerable: true, get
 var notifications_1 = require("./notifications");
 Object.defineProperty(exports, "scheduleTaskNotifications", { enumerable: true, get: function () { return notifications_1.scheduleTaskNotifications; } });
 Object.defineProperty(exports, "sendQueuedNotifications", { enumerable: true, get: function () { return notifications_1.sendQueuedNotifications; } });
+Object.defineProperty(exports, "scanNotificationDeadLetterBacklog", { enumerable: true, get: function () { return notifications_1.scanNotificationDeadLetterBacklog; } });
 Object.defineProperty(exports, "registerDeviceToken", { enumerable: true, get: function () { return notifications_1.registerDeviceToken; } });
 Object.defineProperty(exports, "unregisterDeviceToken", { enumerable: true, get: function () { return notifications_1.unregisterDeviceToken; } });
 var taskSync_1 = require("./taskSync");

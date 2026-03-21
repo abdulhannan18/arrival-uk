@@ -51,4 +51,32 @@ const auth_1 = require("./auth");
         validNumber: 42,
     });
 });
+(0, node_test_1.default)("pseudonymizeLogIdentifier does not contain raw user id", () => {
+    const previous = process.env.LOG_PSEUDONYMIZATION_KEY;
+    process.env.LOG_PSEUDONYMIZATION_KEY = "auth-log-test-key";
+    try {
+        const pseudonymized = auth_1.__private__.pseudonymizeLogIdentifier("uid", "user-123");
+        strict_1.default.ok(pseudonymized?.startsWith("uid:"));
+        strict_1.default.ok(!pseudonymized?.includes("user-123"));
+    }
+    finally {
+        if (previous === undefined) {
+            delete process.env.LOG_PSEUDONYMIZATION_KEY;
+        }
+        else {
+            process.env.LOG_PSEUDONYMIZATION_KEY = previous;
+        }
+    }
+});
+(0, node_test_1.default)("sanitizedFailureKinds strips raw identifiers from cleanup failures", () => {
+    const kinds = auth_1.__private__.sanitizedFailureKinds([
+        "users/user-123:permission_denied",
+        "scoped_cleanup:timeout",
+    ]);
+    strict_1.default.deepEqual(kinds, [
+        "users",
+        "scoped_cleanup",
+    ]);
+    strict_1.default.ok(!kinds.some((entry) => entry.includes(":permission_denied")));
+});
 //# sourceMappingURL=auth.test.js.map

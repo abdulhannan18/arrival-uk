@@ -152,7 +152,7 @@ final class SecureHTTPClient: NSObject, URLSessionDelegate {
         }
 
         let host = challenge.protectionSpace.host.lowercased()
-        let pinnedHashes = AppConfig.networkTrust.pinnedHashes(for: host)
+        let pinnedHashes = AppConfig.networkTrust.intermediateCAPinHashes(for: host)
         let shouldEnforce = AppConfig.networkTrust.enforcePinning
 
         if pinnedHashes.isEmpty {
@@ -165,8 +165,8 @@ final class SecureHTTPClient: NSObject, URLSessionDelegate {
             return
         }
 
-        let observedHashes = Self.subjectPublicKeyInfoSHA256Hashes(from: trust)
-        if pinnedHashes.isDisjoint(with: observedHashes) {
+        let observedHashes = Self.orderedSubjectPublicKeyInfoSHA256Hashes(from: trust)
+        if !Self.intermediateCAPinHashesMatch(pinnedHashes: pinnedHashes, orderedObservedHashes: observedHashes) {
             completionHandler(.cancelAuthenticationChallenge, nil)
             return
         }
@@ -174,8 +174,16 @@ final class SecureHTTPClient: NSObject, URLSessionDelegate {
         completionHandler(.useCredential, URLCredential(trust: trust))
     }
 
-    private static func subjectPublicKeyInfoSHA256Hashes(from trust: SecTrust) -> Set<String> {
-        var hashes: Set<String> = []
+    static func intermediateCAPinHashesMatch(pinnedHashes: Set<String>, orderedObservedHashes: [String]) -> Bool {
+        guard orderedObservedHashes.count > 1 else { return false }
+        let intermediateAndRootHashes = Set(orderedObservedHashes.dropFirst())
+        return !pinnedHashes.isDisjoint(with: intermediateAndRootHashes)
+    }
+
+    // Pinning is intentionally evaluated against index 1+ only. Index 0 is the leaf certificate
+    // and must never satisfy the configured CA pin set, or leaf rotation would weaken the trust model.
+    private static func orderedSubjectPublicKeyInfoSHA256Hashes(from trust: SecTrust) -> [String] {
+        var hashes: [String] = []
         guard let certificateChain = SecTrustCopyCertificateChain(trust) as? [SecCertificate] else {
             return hashes
         }
@@ -186,7 +194,7 @@ final class SecureHTTPClient: NSObject, URLSessionDelegate {
                 continue
             }
             let digest = SHA256.hash(data: spkiData)
-            hashes.insert(Data(digest).base64EncodedString())
+            hashes.append(Data(digest).base64EncodedString())
         }
 
         return hashes

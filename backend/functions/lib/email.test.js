@@ -103,4 +103,39 @@ const email_1 = require("./email");
     strict_1.default.equal(email_1.__private__.digestReservationAction("failed"), "reserve");
     strict_1.default.equal(email_1.__private__.digestReservationAction(null), "reserve");
 });
+(0, node_test_1.default)("log output does not contain raw email or domain", () => {
+    const previousKey = process.env.LOG_PSEUDONYMIZATION_KEY;
+    process.env.LOG_PSEUDONYMIZATION_KEY = "test-log-key";
+    try {
+        const skipContext = email_1.__private__.buildEmailTransportSkipLogContext({
+            to: "student@example.com",
+            from: "noreply@arrivaluk.app",
+            subject: "Sensitive subject",
+            html: "<p>Hello</p>",
+        });
+        const failureContext = email_1.__private__.buildEmailFailureLogContext("boom", {
+            userId: "user_123",
+            ticketId: "ticket_456",
+            templateKey: "support_followup",
+        });
+        const serialized = JSON.stringify({
+            ...skipContext,
+            ...failureContext,
+        });
+        strict_1.default.equal(serialized.includes("student@example.com"), false);
+        strict_1.default.equal(serialized.includes("example.com"), false);
+        strict_1.default.equal(serialized.includes("user_123"), false);
+        strict_1.default.equal(serialized.includes("ticket_456"), false);
+        strict_1.default.match(serialized, /uid:[0-9a-f]{12}/);
+        strict_1.default.match(serialized, /ticket:[0-9a-f]{12}/);
+    }
+    finally {
+        if (previousKey === undefined) {
+            delete process.env.LOG_PSEUDONYMIZATION_KEY;
+        }
+        else {
+            process.env.LOG_PSEUDONYMIZATION_KEY = previousKey;
+        }
+    }
+});
 //# sourceMappingURL=email.test.js.map

@@ -26,8 +26,8 @@ final class SecurityConfigurationTests: XCTestCase {
 
         let resolved = AppConfig.collaborationWebSocketURL
 
-        XCTAssertEqual(resolved?.scheme, "wss")
-        XCTAssertEqual(resolved?.host, "api.arrivaluk.app")
+        XCTAssertEqual(resolved.scheme, "wss")
+        XCTAssertEqual(resolved.host, "api.arrivaluk.app")
     }
 
     func testDevelopmentCollaborationOverrideAllowsInsecureWebSocketURL() {
@@ -36,7 +36,16 @@ final class SecurityConfigurationTests: XCTestCase {
 
         let resolved = AppConfig.collaborationWebSocketURL
 
-        XCTAssertEqual(resolved?.absoluteString, "ws://localhost:8080/realtime")
+        XCTAssertEqual(resolved.absoluteString, "ws://localhost:8080/realtime")
+    }
+
+    func testRequiredConfigValuesArePresentInTestBundle() {
+        AppConfig.setTestingOverride("development", for: "ARRIVAL_APP_ENV")
+        AppConfig.setTestingOverride("https://api.arrivaluk.app", for: "ARRIVAL_API_BASE_URL")
+
+        XCTAssertFalse(AppConfig.applePayMerchantID.isEmpty)
+        XCTAssertEqual(AppConfig.collaborationWebSocketURL.scheme, "wss")
+        XCTAssertEqual(AppConfig.collaborationWebSocketURL.host, "api.arrivaluk.app")
     }
 
     func testMarketplaceProviderRejectsUnallowlistedHostOutsideDevelopment() async {
@@ -101,6 +110,24 @@ final class SecurityConfigurationTests: XCTestCase {
         )
 
         XCTAssertNil(token)
+    }
+
+    func testLeafCertificateAloneDoesNotSatisfyPin() {
+        XCTAssertFalse(
+            SecureHTTPClient.intermediateCAPinHashesMatch(
+                pinnedHashes: ["match"],
+                orderedObservedHashes: ["match"]
+            )
+        )
+    }
+
+    func testIntermediateCertWithMatchingHashAllowsConnection() {
+        XCTAssertTrue(
+            SecureHTTPClient.intermediateCAPinHashesMatch(
+                pinnedHashes: ["match"],
+                orderedObservedHashes: ["leaf", "match"]
+            )
+        )
     }
 
     func testSecureHTTPClientInjectsAuthorizationHeader() async throws {

@@ -12,7 +12,29 @@ service cloud.firestore {
 
     function isAdmin() {
       return isSignedIn()
-        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+        && request.auth.token is map
+        && request.auth.token.keys().hasAny(["admin"])
+        && request.auth.token.admin == true;
+    }
+
+    function isValidAdminWrite() {
+      return isAdmin();
+    }
+
+    function isNonEmptyString(value, maxLength) {
+      return value is string && value.size() > 0 && value.size() <= maxLength;
+    }
+
+    function isNullableString(value, maxLength) {
+      return value == null || (value is string && value.size() <= maxLength);
+    }
+
+    function isNullableTimestamp(value) {
+      return value == null || value is timestamp;
+    }
+
+    function isShortStringList(value, maxItems, maxLength) {
+      return value is list && value.size() <= maxItems;
     }
 
     function userMutableRootKeys() {
@@ -68,14 +90,6 @@ service cloud.firestore {
         "completionRate",
         "lastActivityDate",
       ];
-    }
-
-    function isNullableString(value, maxLength) {
-      return value == null || (value is string && value.size() <= maxLength);
-    }
-
-    function isNullableTimestamp(value) {
-      return value == null || value is timestamp;
     }
 
     function isValidUserProfile(data) {
@@ -222,13 +236,201 @@ service cloud.firestore {
                      && request.resource.data.metadata.keys().size() <= 20));
     }
 
+    function deviceKeys() {
+      return ["fcmToken", "platform", "appVersion", "updatedAt", "createdAt"];
+    }
+
+    function isValidDevicePayload() {
+      return request.resource.data.keys().hasAll(["fcmToken", "platform", "appVersion", "updatedAt"])
+             && request.resource.data.keys().hasOnly(deviceKeys())
+             && isNonEmptyString(request.resource.data.fcmToken, 4096)
+             && request.resource.data.platform in ["ios", "android", "web"]
+             && isNonEmptyString(request.resource.data.appVersion, 32)
+             && request.resource.data.updatedAt is timestamp
+             && (!request.resource.data.keys().hasAny(["createdAt"])
+                 || request.resource.data.createdAt is timestamp);
+    }
+
+    function contentCategoryKeys() {
+      return ["id", "title", "subtitle", "categoryType", "icon", "gradient", "priority", "urgency", "order", "isPublished", "version"];
+    }
+
+    function isValidContentCategory(categoryId) {
+      return request.resource.data.keys().hasAll(["id", "title", "categoryType", "icon", "gradient", "priority", "urgency", "order"])
+             && request.resource.data.keys().hasOnly(contentCategoryKeys())
+             && request.resource.data.id == categoryId
+             && isNonEmptyString(request.resource.data.title, 160)
+             && isNullableString(request.resource.data.subtitle, 160)
+             && isNonEmptyString(request.resource.data.categoryType, 64)
+             && isNonEmptyString(request.resource.data.icon, 120)
+             && request.resource.data.gradient is list
+             && request.resource.data.gradient.size() == 2
+             && request.resource.data.gradient[0] is string
+             && request.resource.data.gradient[1] is string
+             && isNonEmptyString(request.resource.data.priority, 32)
+             && isNonEmptyString(request.resource.data.urgency, 32)
+             && request.resource.data.order is number
+             && request.resource.data.order >= 0
+             && (!request.resource.data.keys().hasAny(["isPublished"])
+                 || request.resource.data.isPublished is bool)
+             && (!request.resource.data.keys().hasAny(["version"])
+                 || (request.resource.data.version is number && request.resource.data.version >= 1));
+    }
+
+    function contentTaskKeys() {
+      return ["id", "categoryId", "title", "detail", "timing", "priority", "sourceTitle", "sourceURL", "isPublished", "version", "order", "universityFilters", "countryFilters", "studyLevelFilters"];
+    }
+
+    function isValidContentTask(taskId) {
+      return request.resource.data.keys().hasAll(["id", "categoryId", "title", "timing", "priority", "isPublished"])
+             && request.resource.data.keys().hasOnly(contentTaskKeys())
+             && request.resource.data.id == taskId
+             && isNonEmptyString(request.resource.data.categoryId, 120)
+             && isNonEmptyString(request.resource.data.title, 200)
+             && isNullableString(request.resource.data.detail, 4000)
+             && isNonEmptyString(request.resource.data.timing, 64)
+             && isNonEmptyString(request.resource.data.priority, 64)
+             && (!request.resource.data.keys().hasAny(["sourceTitle"])
+                 || isNonEmptyString(request.resource.data.sourceTitle, 200))
+             && (!request.resource.data.keys().hasAny(["sourceURL"])
+                 || isNonEmptyString(request.resource.data.sourceURL, 2000))
+             && request.resource.data.isPublished is bool
+             && (!request.resource.data.keys().hasAny(["version"])
+                 || (request.resource.data.version is number && request.resource.data.version >= 1))
+             && (!request.resource.data.keys().hasAny(["order"])
+                 || (request.resource.data.order is number && request.resource.data.order >= 0))
+             && (!request.resource.data.keys().hasAny(["universityFilters"])
+                 || isShortStringList(request.resource.data.universityFilters, 50, 120))
+             && (!request.resource.data.keys().hasAny(["countryFilters"])
+                 || isShortStringList(request.resource.data.countryFilters, 50, 120))
+             && (!request.resource.data.keys().hasAny(["studyLevelFilters"])
+                 || isShortStringList(request.resource.data.studyLevelFilters, 20, 80));
+    }
+
+    function syncedTaskKeys() {
+      return ["id", "title", "categoryID", "isCompleted", "phase", "version", "updatedAt", "storedAt"];
+    }
+
+    function isValidSyncedTask(taskId) {
+      return request.resource.data.keys().hasAll(["id", "title", "categoryID", "isCompleted", "phase", "version", "updatedAt", "storedAt"])
+             && request.resource.data.keys().hasOnly(syncedTaskKeys())
+             && request.resource.data.id == taskId
+             && isNonEmptyString(request.resource.data.title, 256)
+             && isNonEmptyString(request.resource.data.categoryID, 120)
+             && request.resource.data.isCompleted is bool
+             && request.resource.data.phase is number
+             && request.resource.data.version is number
+             && request.resource.data.version >= 1
+             && isNonEmptyString(request.resource.data.updatedAt, 64)
+             && isNonEmptyString(request.resource.data.storedAt, 64);
+    }
+
+    function analyticsEventKeys() {
+      return ["userId", "eventType", "properties", "platform", "appVersion", "timestamp", "expiresAt"];
+    }
+
+    function isValidAnalyticsEvent() {
+      return request.resource.data.keys().hasAll(["userId", "eventType", "properties", "platform", "appVersion", "timestamp", "expiresAt"])
+             && request.resource.data.keys().hasOnly(analyticsEventKeys())
+             && isNonEmptyString(request.resource.data.userId, 128)
+             && isNonEmptyString(request.resource.data.eventType, 120)
+             && request.resource.data.properties is map
+             && request.resource.data.properties.keys().size() <= 30
+             && request.resource.data.platform in ["ios", "android", "web", "backend"]
+             && isNonEmptyString(request.resource.data.appVersion, 32)
+             && request.resource.data.timestamp is timestamp
+             && request.resource.data.expiresAt is timestamp;
+    }
+
+    function featuredPartnershipKeys() {
+      return ["id", "category", "title", "subtitle", "ctaTitle", "destinationURL", "isPublished", "order", "updatedAt"];
+    }
+
+    function isValidFeaturedPartnership(partnershipId) {
+      return request.resource.data.keys().hasAll(["id", "category", "title", "ctaTitle", "destinationURL", "isPublished", "order", "updatedAt"])
+             && request.resource.data.keys().hasOnly(featuredPartnershipKeys())
+             && request.resource.data.id == partnershipId
+             && isNonEmptyString(request.resource.data.category, 80)
+             && isNonEmptyString(request.resource.data.title, 160)
+             && isNullableString(request.resource.data.subtitle, 240)
+             && isNonEmptyString(request.resource.data.ctaTitle, 120)
+             && isNonEmptyString(request.resource.data.destinationURL, 2000)
+             && request.resource.data.isPublished is bool
+             && request.resource.data.order is number
+             && request.resource.data.order >= 0
+             && request.resource.data.updatedAt is timestamp;
+    }
+
+    function phase3ConfigKeys() {
+      return ["swipe_threshold", "spring_damping", "hero_card_limit", "critical_urgency_threshold"];
+    }
+
+    function isValidPhase3Config(data) {
+      return data is map
+             && data.keys().hasOnly(phase3ConfigKeys())
+             && data.swipe_threshold is number
+             && data.spring_damping is number
+             && data.hero_card_limit is number
+             && data.critical_urgency_threshold is number;
+    }
+
+    function phase4WalletKeys() {
+      return ["required_docs", "biometric_enforced"];
+    }
+
+    function isValidPhase4WalletConfig(data) {
+      return data is map
+             && data.keys().hasOnly(phase4WalletKeys())
+             && data.required_docs is list
+             && data.required_docs.size() > 0
+             && data.required_docs.size() <= 12
+             && data.biometric_enforced is bool;
+    }
+
+    function phase14MarketplaceKeys() {
+      return ["identity_token_ttl_seconds", "providers"];
+    }
+
+    function isValidPhase14MarketplaceConfig(data) {
+      return data is map
+             && data.keys().hasOnly(phase14MarketplaceKeys())
+             && data.identity_token_ttl_seconds is number
+             && data.identity_token_ttl_seconds >= 60
+             && data.identity_token_ttl_seconds <= 3600
+             && data.providers is list
+             && data.providers.size() <= 100;
+    }
+
+    function phase15GlobalKeys() {
+      return ["active_region", "fallback_region", "regions"];
+    }
+
+    function isValidPhase15GlobalConfig(data) {
+      return data is map
+             && data.keys().hasOnly(phase15GlobalKeys())
+             && isNonEmptyString(data.active_region, 32)
+             && isNonEmptyString(data.fallback_region, 32)
+             && data.regions is list
+             && data.regions.size() > 0
+             && data.regions.size() <= 32;
+    }
+
+    function isValidFeatureFlagsConfig() {
+      return request.resource.data.keys().hasAll(["phase_3_config", "phase_4_wallet", "phase_14_marketplace", "phase_15_global"])
+             && request.resource.data.keys().hasOnly(["phase_3_config", "phase_4_wallet", "phase_14_marketplace", "phase_15_global"])
+             && isValidPhase3Config(request.resource.data.phase_3_config)
+             && isValidPhase4WalletConfig(request.resource.data.phase_4_wallet)
+             && isValidPhase14MarketplaceConfig(request.resource.data.phase_14_marketplace)
+             && isValidPhase15GlobalConfig(request.resource.data.phase_15_global);
+    }
+
     // User root profile
     match /users/{userId} {
       allow read: if isOwner(userId) || isAdmin();
       // User documents are created and deleted by trusted backend auth triggers.
-      allow create, delete: if isAdmin();
+      allow create, delete: if isValidAdminWrite();
       // End users can only mutate profile/preferences/progress trees.
-      allow update: if isAdmin()
+      allow update: if isValidAdminWrite()
                     || (isOwner(userId)
                         && hasOnlyUserMutableRootChanges()
                         && hasValidUserMutablePayload());
@@ -236,30 +438,49 @@ service cloud.firestore {
 
     match /users/{userId}/devices/{deviceId} {
       allow read: if isOwner(userId) || isAdmin();
-      allow create, update, delete: if isAdmin();
+      allow create, update: if isValidAdminWrite() && isValidDevicePayload();
+      allow delete: if isValidAdminWrite();
     }
 
     // User nested data is backend-owned unless explicitly allowed above.
-    match /users/{userId}/{document=**} {
-      allow read, write: if isAdmin();
+    match /users/{userId}/{collectionId}/{document=**} {
+      allow read, write: if collectionId != "devices" && isAdmin();
     }
 
-    // Public content (authoring by admins only)
+    match /content/categories/items/{categoryId} {
+      allow read: if true;
+      allow create, update: if isValidAdminWrite() && isValidContentCategory(categoryId);
+      allow delete: if isValidAdminWrite();
+    }
+
+    match /content/tasks/items/{taskId} {
+      allow read: if true;
+      allow create, update: if isValidAdminWrite() && isValidContentTask(taskId);
+      allow delete: if isValidAdminWrite();
+    }
+
+    match /content/syncedTasks/items/{taskId} {
+      allow read: if true;
+      allow create, update: if isValidAdminWrite() && isValidSyncedTask(taskId);
+      allow delete: if isValidAdminWrite();
+    }
+
+    // Public content reads remain open; all other content writes are denied unless matched above.
     match /content/{document=**} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if false;
     }
 
     // Analytics writes are backend-owned callable functions.
     match /analytics/events/items/{eventId} {
-      // Client writes are disabled; analytics events are written by callable backend functions.
-      allow create: if false;
+      allow create, update: if isValidAdminWrite() && isValidAnalyticsEvent();
       allow read: if isAdmin();
-      allow update, delete: if false;
+      allow delete: if isValidAdminWrite();
     }
 
     match /analytics/{document=**} {
-      allow read, write: if isAdmin();
+      allow read: if isAdmin();
+      allow write: if false;
     }
 
     // Support writes are backend-owned callable functions with server-side validation + rate limits.
@@ -267,13 +488,13 @@ service cloud.firestore {
       allow create: if false;
       allow read: if isSignedIn()
                   && (resource.data.userId == request.auth.uid || isAdmin());
-      allow update, delete: if isAdmin();
+      allow update, delete: if isValidAdminWrite();
     }
 
     match /support/tickets/items/{ticketId}/messages/{messageId} {
       allow create: if false;
       allow read: if isTicketOwner(ticketId) || isAdmin();
-      allow update, delete: if isAdmin();
+      allow update, delete: if isValidAdminWrite();
     }
 
     // Referral and partnerships/public config
@@ -281,22 +502,39 @@ service cloud.firestore {
       allow read: if isAdmin()
                   || (isSignedIn() && resource.data.ownerUserId == request.auth.uid);
       allow create: if false;
-      allow update: if isAdmin();
-      allow delete: if isAdmin();
+      allow update: if isValidAdminWrite();
+      allow delete: if isValidAdminWrite();
+    }
+
+    match /partnerships/featured/items/{partnershipId} {
+      allow read: if true;
+      allow create, update: if isValidAdminWrite() && isValidFeaturedPartnership(partnershipId);
+      allow delete: if isValidAdminWrite();
     }
 
     match /partnerships/{document=**} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if false;
+    }
+
+    match /config/featureFlags {
+      allow read: if true;
+      allow create, update: if isValidAdminWrite() && isValidFeatureFlagsConfig();
+      allow delete: if isValidAdminWrite();
     }
 
     match /config/{document=**} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if false;
     }
 
     // Notification queue is backend-managed
     match /notifications/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /notificationDeadLetter/{notificationId} {
       allow read: if isAdmin();
       allow write: if false;
     }

@@ -248,14 +248,10 @@ private final class MarketplaceApplePaySessionAuthorizer: NSObject, PKPaymentAut
 @MainActor
 private struct MarketplaceApplePayAuthorizer: MarketplaceApplePayAuthorizing {
     func authorizePayment(for descriptor: MarketplaceProviderDescriptor) async -> MarketplacePaymentAuthorizationResult {
-        guard let merchantID = AppConfig.applePayMerchantID else {
-            return .unavailable("Apple Pay merchant configuration is missing.")
-        }
-
         let sessionAuthorizer = MarketplaceApplePaySessionAuthorizer()
         return await sessionAuthorizer.authorizePayment(
             for: descriptor,
-            merchantID: merchantID
+            merchantID: AppConfig.applePayMerchantID
         )
     }
 }

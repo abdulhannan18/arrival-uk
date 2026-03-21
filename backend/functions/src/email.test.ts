@@ -151,3 +151,41 @@ test("digest retry succeeds when previous send failed", () => {
   assert.equal(__private__.digestReservationAction("failed"), "reserve");
   assert.equal(__private__.digestReservationAction(null), "reserve");
 });
+
+
+test("log output does not contain raw email or domain", () => {
+  const previousKey = process.env.LOG_PSEUDONYMIZATION_KEY;
+  process.env.LOG_PSEUDONYMIZATION_KEY = "test-log-key";
+
+  try {
+    const skipContext = __private__.buildEmailTransportSkipLogContext({
+      to: "student@example.com",
+      from: "noreply@arrivaluk.app",
+      subject: "Sensitive subject",
+      html: "<p>Hello</p>",
+    });
+    const failureContext = __private__.buildEmailFailureLogContext("boom", {
+      userId: "user_123",
+      ticketId: "ticket_456",
+      templateKey: "support_followup",
+    });
+
+    const serialized = JSON.stringify({
+      ...skipContext,
+      ...failureContext,
+    });
+
+    assert.equal(serialized.includes("student@example.com"), false);
+    assert.equal(serialized.includes("example.com"), false);
+    assert.equal(serialized.includes("user_123"), false);
+    assert.equal(serialized.includes("ticket_456"), false);
+    assert.match(serialized, /uid:[0-9a-f]{12}/);
+    assert.match(serialized, /ticket:[0-9a-f]{12}/);
+  } finally {
+    if (previousKey === undefined) {
+      delete process.env.LOG_PSEUDONYMIZATION_KEY;
+    } else {
+      process.env.LOG_PSEUDONYMIZATION_KEY = previousKey;
+    }
+  }
+});

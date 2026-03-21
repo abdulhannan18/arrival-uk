@@ -57,3 +57,33 @@ test("sanitizeAnalyticsProperties keeps only supported primitive values", () => 
     validNumber: 42,
   });
 });
+
+test("pseudonymizeLogIdentifier does not contain raw user id", () => {
+  const previous = process.env.LOG_PSEUDONYMIZATION_KEY;
+  process.env.LOG_PSEUDONYMIZATION_KEY = "auth-log-test-key";
+
+  try {
+    const pseudonymized = __private__.pseudonymizeLogIdentifier("uid", "user-123");
+    assert.ok(pseudonymized?.startsWith("uid:"));
+    assert.ok(!pseudonymized?.includes("user-123"));
+  } finally {
+    if (previous === undefined) {
+      delete process.env.LOG_PSEUDONYMIZATION_KEY;
+    } else {
+      process.env.LOG_PSEUDONYMIZATION_KEY = previous;
+    }
+  }
+});
+
+test("sanitizedFailureKinds strips raw identifiers from cleanup failures", () => {
+  const kinds = __private__.sanitizedFailureKinds([
+    "users/user-123:permission_denied",
+    "scoped_cleanup:timeout",
+  ]);
+
+  assert.deepEqual(kinds, [
+    "users",
+    "scoped_cleanup",
+  ]);
+  assert.ok(!kinds.some((entry) => entry.includes(":permission_denied")));
+});

@@ -11,6 +11,7 @@ export {
 export {
   scheduleTaskNotifications,
   sendQueuedNotifications,
+  scanNotificationDeadLetterBacklog,
   registerDeviceToken,
   unregisterDeviceToken,
 } from "./notifications";

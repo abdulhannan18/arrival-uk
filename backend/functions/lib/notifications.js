@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.__private__ = exports.unregisterDeviceToken = exports.registerDeviceToken = exports.sendQueuedNotifications = exports.scheduleTaskNotifications = void 0;
+exports.__private__ = exports.unregisterDeviceToken = exports.registerDeviceToken = exports.scanNotificationDeadLetterBacklog = exports.sendQueuedNotifications = exports.scheduleTaskNotifications = void 0;
 const admin = __importStar(require("firebase-admin"));
 const functions = __importStar(require("firebase-functions"));
 const crypto_1 = require("crypto");
@@ -54,6 +54,7 @@ const MAX_NOTIFICATION_RETRY_ATTEMPTS = 5;
 const NOTIFICATION_RETRY_DELAYS_MINUTES = [5, 15, 60, 180, 720];
 const MAX_NOTIFICATION_ERROR_LENGTH = 240;
 const DEVICE_TOKEN_QUERY_BATCH_SIZE = 10;
+const LOG_PSEUDONYMIZATION_KEY = "LOG_PSEUDONYMIZATION_KEY";
 const PERMANENT_MESSAGING_ERROR_CODES = new Set([
     "messaging/invalid-registration-token",
     "messaging/registration-token-not-registered",
@@ -122,16 +123,33 @@ function queueDocumentID(userId, taskId, sendAt) {
     const dayKey = sendAt.toISOString().slice(0, 10);
     return `${userId}_${taskId}_${dayKey}`.replace(/[^A-Za-z0-9_-]/g, "_");
 }
+function logPseudonymizationKey() {
+    const configured = (process.env.LOG_PSEUDONYMIZATION_KEY ||
+        functions.config()?.logging?.pseudonymization_key);
+    const normalized = configured?.trim() ?? "";
+    return normalized.length > 0 ? normalized : null;
+}
+function pseudonymizeLogIdentifier(prefix, value) {
+    if (typeof value !== "string")
+        return undefined;
+    const normalized = value.trim();
+    const key = logPseudonymizationKey();
+    if (!normalized || !key)
+        return undefined;
+    const digest = (0, crypto_1.createHmac)("sha256", key).update(normalized).digest("hex");
+    return `${prefix}:${digest.slice(0, 12)}`;
+}
 function buildNotificationAttemptLog(notificationId, userId, type, result, errorMessage) {
-    return {
-        notificationId,
-        userId,
+    const payload = {
+        notificationRef: pseudonymizeLogIdentifier("notif", notificationId),
+        userRef: pseudonymizeLogIdentifier("uid", userId),
         type,
         channel: "push",
         timestamp: new Date().toISOString(),
         result,
         error: errorMessage ? truncateErrorMessage(errorMessage) : undefined,
     };
+    return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined));
 }
 function isAlreadyExistsError(error) {
     const code = error?.code;
@@ -150,6 +168,50 @@ function retryDelayMsForAttempt(attempt) {
 }
 function truncateErrorMessage(message) {
     return message.slice(0, MAX_NOTIFICATION_ERROR_LENGTH);
+}
+function deadLetterCollectionRef(firestore = db) {
+    return firestore.collection(constants_1.Collections.notificationDeadLetter);
+}
+function buildNotificationDeadLetterRecord(notificationId, notification, attemptCount, failureReason, failureCode, deadLetteredAt = admin.firestore.Timestamp.now()) {
+    return {
+        notificationId,
+        userId: pseudonymizeLogIdentifier("uid", notification.userId) ?? "uid:unavailable",
+        notificationType: notification.type,
+        channel: "push",
+        failureReason: truncateErrorMessage(failureReason || "notification_send_failed"),
+        failureCode: failureCode ?? "unknown",
+        attemptCount,
+        firstAttemptAt: notification.scheduledFor,
+        lastAttemptAt: notification.lastAttemptAt ?? deadLetteredAt,
+        deadLetteredAt,
+        payload: {
+            type: notification.type,
+            title: notification.title,
+            body: notification.body,
+            data: { ...notification.data },
+        },
+    };
+}
+async function persistTerminalNotificationFailure(notificationRef, notificationId, notification, attemptCount, failureReason, failureCode, deadLetterCollection = deadLetterCollectionRef(), deadLetteredAt = admin.firestore.Timestamp.now()) {
+    const message = truncateErrorMessage(failureReason || "notification_send_failed");
+    await notificationRef.update({
+        sent: true,
+        sentAt: admin.firestore.FieldValue.serverTimestamp(),
+        retryCount: attemptCount,
+        error: message,
+        lastAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    try {
+        await deadLetterCollection.doc(notificationId).set(buildNotificationDeadLetterRecord(notificationId, notification, attemptCount, message, failureCode, deadLetteredAt), { merge: true });
+    }
+    catch (error) {
+        functions.logger.error("notification_dead_letter_write_failed", Object.fromEntries(Object.entries({
+            notificationRef: pseudonymizeLogIdentifier("notif", notificationId),
+            userRef: pseudonymizeLogIdentifier("uid", notification.userId),
+            failureCode: failureCode ?? undefined,
+            error: truncateErrorMessage(error instanceof Error ? error.message : "dead_letter_write_failed"),
+        }).filter(([, value]) => value !== undefined)));
+    }
 }
 function extractMessagingErrorCode(error) {
     const code = error?.code;
@@ -298,26 +360,29 @@ async function removeInvalidTokensForUser(userId, invalidTokens) {
         await syncLegacyTokenFromDevices(userRef);
     }
 }
-async function scheduleNotificationRetry(notificationRef, nextRetryCount, reason) {
+async function scheduleNotificationRetry(notifDoc, notification, nextRetryCount, reason, failureCode = null) {
     const message = truncateErrorMessage(reason || "notification_send_failed");
     if (nextRetryCount >= MAX_NOTIFICATION_RETRY_ATTEMPTS) {
-        await notificationRef.update({
-            sent: true,
-            sentAt: admin.firestore.FieldValue.serverTimestamp(),
-            retryCount: nextRetryCount,
-            error: message,
-            lastAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
+        await persistTerminalNotificationFailure(notifDoc.ref, notifDoc.id, notification, nextRetryCount, message, failureCode);
         return;
     }
     const retryAt = admin.firestore.Timestamp.fromMillis(Date.now() + retryDelayMsForAttempt(nextRetryCount));
-    await notificationRef.update({
+    await notifDoc.ref.update({
         sent: false,
         retryCount: nextRetryCount,
         scheduledFor: retryAt,
         error: message,
         lastAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
     });
+}
+function buildQueuedNotificationFailureLog(notificationId, userId, retryCount, message, code) {
+    return Object.fromEntries(Object.entries({
+        notificationRef: pseudonymizeLogIdentifier("notif", notificationId),
+        userRef: pseudonymizeLogIdentifier("uid", userId),
+        message: truncateErrorMessage(message),
+        failureCode: code ?? undefined,
+        retryCount,
+    }).filter(([, value]) => value !== undefined));
 }
 async function processQueuedNotification(notifDoc, tokensForUser, invalidateTokenCacheForUser) {
     const notif = notifDoc.data();
@@ -378,39 +443,22 @@ async function processQueuedNotification(notifDoc, tokensForUser, invalidateToke
             && failedCodes.every((code) => isPermanentMessagingErrorCode(code));
         if (allPermanentFailures) {
             functions.logger.warn("notification_delivery", buildNotificationAttemptLog(notifDoc.id, notif.userId, notif.type, "failure", "all_device_tokens_invalid"));
-            await notifDoc.ref.update({
-                sent: true,
-                sentAt: admin.firestore.FieldValue.serverTimestamp(),
-                retryCount: retryCount + 1,
-                error: "all_device_tokens_invalid",
-                lastAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
-            });
+            await persistTerminalNotificationFailure(notifDoc.ref, notifDoc.id, notif, retryCount + 1, "all_device_tokens_invalid", failedCodes[0] ?? null);
             return;
         }
-        await scheduleNotificationRetry(notifDoc.ref, retryCount + 1, failedCodes[0] ?? "notification_send_failed");
+        await scheduleNotificationRetry(notifDoc, notif, retryCount + 1, failedCodes[0] ?? "notification_send_failed", failedCodes[0] ?? null);
         functions.logger.warn("notification_delivery", buildNotificationAttemptLog(notifDoc.id, notif.userId, notif.type, "failure", failedCodes[0] ?? "notification_send_failed"));
     }
     catch (error) {
         const message = error instanceof Error ? error.message : "unknown_error";
         const code = extractMessagingErrorCode(error);
         if (isPermanentMessagingErrorCode(code)) {
-            await notifDoc.ref.update({
-                sent: true,
-                sentAt: admin.firestore.FieldValue.serverTimestamp(),
-                retryCount: retryCount + 1,
-                error: truncateErrorMessage(message),
-                lastAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
-            });
+            await persistTerminalNotificationFailure(notifDoc.ref, notifDoc.id, notif, retryCount + 1, message, code);
             return;
         }
-        await scheduleNotificationRetry(notifDoc.ref, retryCount + 1, message);
+        await scheduleNotificationRetry(notifDoc, notif, retryCount + 1, message, code);
         functions.logger.warn("notification_delivery", buildNotificationAttemptLog(notifDoc.id, notif.userId, notif.type, "failure", message));
-        functions.logger.error("Failed to send queued notification", {
-            notificationId: notifDoc.id,
-            message: truncateErrorMessage(message),
-            code,
-            retryCount: retryCount + 1,
-        });
+        functions.logger.error("Failed to send queued notification", buildQueuedNotificationFailureLog(notifDoc.id, notif.userId, retryCount + 1, message, code));
     }
 }
 async function queueReminder(userId, task, daysUntilArrival) {
@@ -516,7 +564,7 @@ exports.scheduleTaskNotifications = functions.pubsub
                 if (queueOperations.length >= queueBatchSize) {
                     await drainQueuedOperations(queueOperations, {
                         phase: "schedule",
-                        userId,
+                        userRef: pseudonymizeLogIdentifier("uid", userId),
                     });
                 }
             }
@@ -585,6 +633,22 @@ exports.sendQueuedNotifications = functions.pubsub
         }
     }
     await drainQueuedOperations(dispatchOperations, { phase: "dispatch_flush" });
+    return null;
+});
+exports.scanNotificationDeadLetterBacklog = functions.pubsub
+    .schedule("every 24 hours")
+    .onRun(async () => {
+    const cutoff = admin.firestore.Timestamp.fromMillis(Date.now() - 24 * 60 * 60 * 1000);
+    const snapshot = await db
+        .collection(constants_1.Collections.notificationDeadLetter)
+        .where("deadLetteredAt", "<=", cutoff)
+        .limit(100)
+        .get();
+    if (!snapshot.empty) {
+        functions.logger.warn("notification_dead_letter_backlog", {
+            count: snapshot.size,
+        });
+    }
     return null;
 });
 exports.registerDeviceToken = functions.https.onCall(async (data, context) => {
@@ -666,6 +730,10 @@ exports.__private__ = {
     isPermanentMessagingErrorCode,
     queueDocumentID,
     buildNotificationAttemptLog,
+    buildQueuedNotificationFailureLog,
+    buildNotificationDeadLetterRecord,
+    persistTerminalNotificationFailure,
+    pseudonymizeLogIdentifier,
     invalidTokensFromMessagingResponses,
 };
 //# sourceMappingURL=notifications.js.map

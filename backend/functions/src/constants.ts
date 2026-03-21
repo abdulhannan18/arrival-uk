@@ -2,6 +2,7 @@ export const Collections = {
   users: "users",
   admins: "admins",
   referrals: "referrals",
+  notificationDeadLetter: "notificationDeadLetter",
   devices: "devices",
   analytics: {
     root: "analytics",

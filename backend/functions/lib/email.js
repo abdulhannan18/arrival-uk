@@ -54,6 +54,7 @@ const MAX_TEMPLATE_VARIABLE_VALUE_LENGTH = 500;
 const MAX_UNSUBSCRIBE_LINK_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const SENDGRID_API_KEY_SECRET = "SENDGRID_API_KEY";
 const UNSUBSCRIBE_HMAC_SECRET = "UNSUBSCRIBE_HMAC_SECRET";
+const LOG_PSEUDONYMIZATION_KEY = "LOG_PSEUDONYMIZATION_KEY";
 const ALLOWED_CUSTOM_EMAIL_TEMPLATES = new Set([
     "support_followup",
     "broadcast_update",
@@ -140,6 +141,33 @@ function unsubscribeBaseURL() {
     const configured = (process.env.WEEKLY_DIGEST_UNSUBSCRIBE_URL ||
         functions.config()?.app?.weekly_digest_unsubscribe_url);
     return (0, sanitization_1.sanitizeHTTPSURL)(configured ?? fallback, fallback);
+}
+function logPseudonymizationKey() {
+    const configured = (process.env.LOG_PSEUDONYMIZATION_KEY ||
+        functions.config()?.logging?.pseudonymization_key);
+    const normalized = configured?.trim() ?? "";
+    return normalized.length > 0 ? normalized : null;
+}
+function pseudonymizeLogIdentifier(prefix, value) {
+    if (typeof value !== "string")
+        return undefined;
+    const normalized = value.trim();
+    const key = logPseudonymizationKey();
+    if (!normalized || !key)
+        return undefined;
+    const digest = (0, crypto_1.createHmac)("sha256", key).update(normalized).digest("hex");
+    return `${prefix}:${digest.slice(0, 12)}`;
+}
+function buildEmailTransportSkipLogContext(_payload) {
+    return {};
+}
+function buildEmailFailureLogContext(errorMessage, options) {
+    return Object.fromEntries(Object.entries({
+        userRef: pseudonymizeLogIdentifier("uid", options?.userId),
+        ticketRef: pseudonymizeLogIdentifier("ticket", options?.ticketId),
+        templateKey: options?.templateKey,
+        error: errorMessage,
+    }).filter(([, value]) => value !== undefined));
 }
 function base64Url(buffer) {
     return buffer.toString("base64")
@@ -257,6 +285,8 @@ function digestSendCollectionRef() {
 async function reserveWeeklyDigestSend(userId, windowKey) {
     const idempotencyKey = weeklyDigestIdempotencyKey(userId, windowKey);
     const reservationRef = digestSendCollectionRef().doc(idempotencyKey);
+    // Firestore does not provide a true unique constraint here; see DEBT.md
+    // "EMAIL DIGEST IDEMPOTENCY — DB CONSTRAINT GAP" for the residual risk.
     return db.runTransaction(async (transaction) => {
         const snapshot = await transaction.get(reservationRef);
         const existingStatus = safeString(snapshot.data()?.status);
@@ -317,10 +347,7 @@ function supportCreatedHTML(displayName, ticketId, subject) {
 async function sendMail(payload) {
     const client = getSendGridClient();
     if (!client) {
-        functions.logger.warn("SendGrid not configured; email skipped", {
-            toDomain: extractEmailDomain(payload.to),
-            subject: payload.subject,
-        });
+        functions.logger.warn("SendGrid not configured; outbound mail skipped", buildEmailTransportSkipLogContext(payload));
         return;
     }
     await client.send(payload);
@@ -413,11 +440,7 @@ exports.sendWelcomeEmailOnSignup = emailRuntime.auth.user().onCreate(async (user
         });
     }
     catch (error) {
-        functions.logger.error("Failed to send welcome email", {
-            userId: user.uid,
-            toDomain: extractEmailDomain(user.email),
-            error: error instanceof Error ? error.message : "unknown_error",
-        });
+        functions.logger.error("Failed to send welcome message", buildEmailFailureLogContext(error instanceof Error ? error.message : "unknown_error", { userId: user.uid }));
     }
 });
 exports.sendWeeklyDigestEmail = emailRuntime.pubsub
@@ -496,11 +519,7 @@ exports.sendWeeklyDigestEmail = emailRuntime.pubsub
                 catch (error) {
                     const message = error instanceof Error ? error.message : "unknown_error";
                     await markWeeklyDigestSendResult(reservation.idempotencyKey, "failed", message);
-                    functions.logger.error("Failed to send weekly digest", {
-                        userId: userDoc.id,
-                        toDomain: extractEmailDomain(to),
-                        error: message,
-                    });
+                    functions.logger.error("Failed to send weekly digest", buildEmailFailureLogContext(message, { userId: userDoc.id }));
                 }
             })());
             totalRecipients += 1;
@@ -537,11 +556,7 @@ exports.sendSupportTicketConfirmation = emailRuntime.firestore
         });
     }
     catch (error) {
-        functions.logger.error("Failed to send support ticket confirmation", {
-            ticketId: context.params.ticketId,
-            toDomain: extractEmailDomain(to),
-            error: error instanceof Error ? error.message : "unknown_error",
-        });
+        functions.logger.error("Failed to send support ticket confirmation", buildEmailFailureLogContext(error instanceof Error ? error.message : "unknown_error", { ticketId: context.params.ticketId }));
     }
 });
 exports.sendCustomEmail = emailRuntime.https.onCall(async (data, context) => {
@@ -598,11 +613,10 @@ exports.sendCustomEmail = emailRuntime.https.onCall(async (data, context) => {
     catch (error) {
         const errorCode = error instanceof Error ? error.name : "unknown_error";
         await writeCustomEmailAudit(context.auth.uid, templateKey, to, "failed", errorCode);
-        functions.logger.error("Failed to send custom email", {
+        functions.logger.error("Failed to send custom message", buildEmailFailureLogContext(error instanceof Error ? error.message : "unknown_error", {
             userId: context.auth.uid,
             templateKey,
-            error: error instanceof Error ? error.message : "unknown_error",
-        });
+        }));
         throw new functions.https.HttpsError("internal", "Failed to send email");
     }
 });
@@ -643,10 +657,7 @@ exports.unsubscribeWeeklyDigest = emailRuntime.https.onRequest(async (request, r
             .send(renderWeeklyDigestUnsubscribeSuccess());
     }
     catch (error) {
-        functions.logger.error("Failed to unsubscribe weekly digest", {
-            userId,
-            error: error instanceof Error ? error.message : "unknown_error",
-        });
+        functions.logger.error("Failed to unsubscribe weekly digest", buildEmailFailureLogContext(error instanceof Error ? error.message : "unknown_error", { userId }));
         response.status(500).send("Could not update email preferences. Please try again later.");
     }
 });
@@ -662,6 +673,9 @@ exports.__private__ = {
     weeklyDigestWindowKey,
     weeklyDigestIdempotencyKey,
     digestReservationAction,
+    buildEmailTransportSkipLogContext,
+    buildEmailFailureLogContext,
+    pseudonymizeLogIdentifier,
     WEEKLY_DIGEST_EMAIL_TYPE,
 };
 //# sourceMappingURL=email.js.map

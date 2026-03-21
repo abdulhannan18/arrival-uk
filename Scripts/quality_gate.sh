@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# SCOPE: This script is a POST-TEST quality gate only.
+# It does NOT invoke test runners. It must be called by CI after
+# both of the following have already been run and passed:
+#   1. backend/functions: npm test
+#   2. iOS: xcodebuild test -scheme "arrival uk"
+# Running this script standalone without prior test execution
+# will produce a misleading passing gate result.
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 

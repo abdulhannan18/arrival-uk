@@ -1,6 +1,6 @@
 import * as admin from "firebase-admin";
 import * as functions from "firebase-functions";
-import { createHash } from "crypto";
+import { createHash, createHmac } from "crypto";
 import { assertCallableAppCheck } from "./utils/appCheck";
 import { Collections, TaskTiming } from "./constants";
 
@@ -20,6 +20,7 @@ const MAX_NOTIFICATION_RETRY_ATTEMPTS = 5;
 const NOTIFICATION_RETRY_DELAYS_MINUTES = [5, 15, 60, 180, 720];
 const MAX_NOTIFICATION_ERROR_LENGTH = 240;
 const DEVICE_TOKEN_QUERY_BATCH_SIZE = 10;
+const LOG_PSEUDONYMIZATION_KEY = "LOG_PSEUDONYMIZATION_KEY";
 const PERMANENT_MESSAGING_ERROR_CODES = new Set<string>([
   "messaging/invalid-registration-token",
   "messaging/registration-token-not-registered",
@@ -37,6 +38,39 @@ type TaskReminderRecord = {
   sentAt?: admin.firestore.Timestamp;
   error?: string;
   retryCount?: number;
+  lastAttemptAt?: admin.firestore.Timestamp;
+};
+
+type NotificationDeadLetterRecord = {
+  notificationId: string;
+  userId: string;
+  notificationType: string;
+  channel: "push";
+  failureReason: string;
+  failureCode: string;
+  attemptCount: number;
+  firstAttemptAt: admin.firestore.Timestamp;
+  lastAttemptAt: admin.firestore.Timestamp;
+  deadLetteredAt: admin.firestore.Timestamp;
+  payload: {
+    type: string;
+    title: string;
+    body: string;
+    data: Record<string, string>;
+  };
+};
+
+type NotificationDeadLetterCollectionLike = {
+  doc(id: string): {
+    set(
+      data: NotificationDeadLetterRecord,
+      options?: { merge?: boolean }
+    ): Promise<unknown>;
+  };
+};
+
+type NotificationUpdateRefLike = {
+  update(data: Record<string, unknown>): Promise<unknown>;
 };
 
 type ContentTask = {
@@ -118,6 +152,24 @@ function queueDocumentID(userId: string, taskId: string, sendAt: Date): string {
   return `${userId}_${taskId}_${dayKey}`.replace(/[^A-Za-z0-9_-]/g, "_");
 }
 
+function logPseudonymizationKey(): string | null {
+  const configured = (
+    process.env.LOG_PSEUDONYMIZATION_KEY ||
+    functions.config()?.logging?.pseudonymization_key
+  ) as string | undefined;
+  const normalized = configured?.trim() ?? "";
+  return normalized.length > 0 ? normalized : null;
+}
+
+function pseudonymizeLogIdentifier(prefix: string, value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim();
+  const key = logPseudonymizationKey();
+  if (!normalized || !key) return undefined;
+  const digest = createHmac("sha256", key).update(normalized).digest("hex");
+  return `${prefix}:${digest.slice(0, 12)}`;
+}
+
 function buildNotificationAttemptLog(
   notificationId: string,
   userId: string,
@@ -125,15 +177,19 @@ function buildNotificationAttemptLog(
   result: "success" | "failure" | "skipped",
   errorMessage?: string
 ): Record<string, unknown> {
-  return {
-    notificationId,
-    userId,
+  const payload: Record<string, unknown> = {
+    notificationRef: pseudonymizeLogIdentifier("notif", notificationId),
+    userRef: pseudonymizeLogIdentifier("uid", userId),
     type,
     channel: "push",
     timestamp: new Date().toISOString(),
     result,
     error: errorMessage ? truncateErrorMessage(errorMessage) : undefined,
   };
+
+  return Object.fromEntries(
+    Object.entries(payload).filter(([, value]) => value !== undefined)
+  );
 }
 
 function isAlreadyExistsError(error: unknown): boolean {
@@ -155,6 +211,83 @@ function retryDelayMsForAttempt(attempt: number): number {
 
 function truncateErrorMessage(message: string): string {
   return message.slice(0, MAX_NOTIFICATION_ERROR_LENGTH);
+}
+
+function deadLetterCollectionRef(
+  firestore: Pick<FirebaseFirestore.Firestore, "collection"> = db
+): NotificationDeadLetterCollectionLike {
+  return firestore.collection(Collections.notificationDeadLetter) as NotificationDeadLetterCollectionLike;
+}
+
+function buildNotificationDeadLetterRecord(
+  notificationId: string,
+  notification: TaskReminderRecord,
+  attemptCount: number,
+  failureReason: string,
+  failureCode: string | null,
+  deadLetteredAt: admin.firestore.Timestamp = admin.firestore.Timestamp.now()
+): NotificationDeadLetterRecord {
+  return {
+    notificationId,
+    userId: pseudonymizeLogIdentifier("uid", notification.userId) ?? "uid:unavailable",
+    notificationType: notification.type,
+    channel: "push",
+    failureReason: truncateErrorMessage(failureReason || "notification_send_failed"),
+    failureCode: failureCode ?? "unknown",
+    attemptCount,
+    firstAttemptAt: notification.scheduledFor,
+    lastAttemptAt: notification.lastAttemptAt ?? deadLetteredAt,
+    deadLetteredAt,
+    payload: {
+      type: notification.type,
+      title: notification.title,
+      body: notification.body,
+      data: { ...notification.data },
+    },
+  };
+}
+
+async function persistTerminalNotificationFailure(
+  notificationRef: NotificationUpdateRefLike,
+  notificationId: string,
+  notification: TaskReminderRecord,
+  attemptCount: number,
+  failureReason: string,
+  failureCode: string | null,
+  deadLetterCollection: NotificationDeadLetterCollectionLike = deadLetterCollectionRef(),
+  deadLetteredAt: admin.firestore.Timestamp = admin.firestore.Timestamp.now()
+): Promise<void> {
+  const message = truncateErrorMessage(failureReason || "notification_send_failed");
+  await notificationRef.update({
+    sent: true,
+    sentAt: admin.firestore.FieldValue.serverTimestamp(),
+    retryCount: attemptCount,
+    error: message,
+    lastAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  try {
+    await deadLetterCollection.doc(notificationId).set(
+      buildNotificationDeadLetterRecord(
+        notificationId,
+        notification,
+        attemptCount,
+        message,
+        failureCode,
+        deadLetteredAt
+      ),
+      { merge: true }
+    );
+  } catch (error) {
+    functions.logger.error("notification_dead_letter_write_failed", Object.fromEntries(
+      Object.entries({
+        notificationRef: pseudonymizeLogIdentifier("notif", notificationId),
+        userRef: pseudonymizeLogIdentifier("uid", notification.userId),
+        failureCode: failureCode ?? undefined,
+        error: truncateErrorMessage(error instanceof Error ? error.message : "dead_letter_write_failed"),
+      }).filter(([, value]) => value !== undefined)
+    ));
+  }
 }
 
 function extractMessagingErrorCode(error: unknown): string | null {
@@ -336,32 +469,53 @@ async function removeInvalidTokensForUser(userId: string, invalidTokens: string[
 }
 
 async function scheduleNotificationRetry(
-  notificationRef: FirebaseFirestore.DocumentReference,
+  notifDoc: FirebaseFirestore.QueryDocumentSnapshot,
+  notification: TaskReminderRecord,
   nextRetryCount: number,
-  reason: string
+  reason: string,
+  failureCode: string | null = null
 ): Promise<void> {
   const message = truncateErrorMessage(reason || "notification_send_failed");
   if (nextRetryCount >= MAX_NOTIFICATION_RETRY_ATTEMPTS) {
-    await notificationRef.update({
-      sent: true,
-      sentAt: admin.firestore.FieldValue.serverTimestamp(),
-      retryCount: nextRetryCount,
-      error: message,
-      lastAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
+    await persistTerminalNotificationFailure(
+      notifDoc.ref,
+      notifDoc.id,
+      notification,
+      nextRetryCount,
+      message,
+      failureCode
+    );
     return;
   }
 
   const retryAt = admin.firestore.Timestamp.fromMillis(
     Date.now() + retryDelayMsForAttempt(nextRetryCount)
   );
-  await notificationRef.update({
+  await notifDoc.ref.update({
     sent: false,
     retryCount: nextRetryCount,
     scheduledFor: retryAt,
     error: message,
     lastAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
   });
+}
+
+function buildQueuedNotificationFailureLog(
+  notificationId: string,
+  userId: string,
+  retryCount: number,
+  message: string,
+  code: string | null
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries({
+      notificationRef: pseudonymizeLogIdentifier("notif", notificationId),
+      userRef: pseudonymizeLogIdentifier("uid", userId),
+      message: truncateErrorMessage(message),
+      failureCode: code ?? undefined,
+      retryCount,
+    }).filter(([, value]) => value !== undefined)
+  );
 }
 
 async function processQueuedNotification(
@@ -450,20 +604,23 @@ async function processQueuedNotification(
         "failure",
         "all_device_tokens_invalid"
       ));
-      await notifDoc.ref.update({
-        sent: true,
-        sentAt: admin.firestore.FieldValue.serverTimestamp(),
-        retryCount: retryCount + 1,
-        error: "all_device_tokens_invalid",
-        lastAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
+      await persistTerminalNotificationFailure(
+        notifDoc.ref,
+        notifDoc.id,
+        notif,
+        retryCount + 1,
+        "all_device_tokens_invalid",
+        failedCodes[0] ?? null
+      );
       return;
     }
 
     await scheduleNotificationRetry(
-      notifDoc.ref,
+      notifDoc,
+      notif,
       retryCount + 1,
-      failedCodes[0] ?? "notification_send_failed"
+      failedCodes[0] ?? "notification_send_failed",
+      failedCodes[0] ?? null
     );
     functions.logger.warn("notification_delivery", buildNotificationAttemptLog(
       notifDoc.id,
@@ -477,17 +634,18 @@ async function processQueuedNotification(
     const code = extractMessagingErrorCode(error);
 
     if (isPermanentMessagingErrorCode(code)) {
-      await notifDoc.ref.update({
-        sent: true,
-        sentAt: admin.firestore.FieldValue.serverTimestamp(),
-        retryCount: retryCount + 1,
-        error: truncateErrorMessage(message),
-        lastAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
+      await persistTerminalNotificationFailure(
+        notifDoc.ref,
+        notifDoc.id,
+        notif,
+        retryCount + 1,
+        message,
+        code
+      );
       return;
     }
 
-    await scheduleNotificationRetry(notifDoc.ref, retryCount + 1, message);
+    await scheduleNotificationRetry(notifDoc, notif, retryCount + 1, message, code);
     functions.logger.warn("notification_delivery", buildNotificationAttemptLog(
       notifDoc.id,
       notif.userId,
@@ -495,12 +653,13 @@ async function processQueuedNotification(
       "failure",
       message
     ));
-    functions.logger.error("Failed to send queued notification", {
-      notificationId: notifDoc.id,
-      message: truncateErrorMessage(message),
-      code,
-      retryCount: retryCount + 1,
-    });
+    functions.logger.error("Failed to send queued notification", buildQueuedNotificationFailureLog(
+      notifDoc.id,
+      notif.userId,
+      retryCount + 1,
+      message,
+      code
+    ));
   }
 }
 
@@ -626,7 +785,7 @@ export const scheduleTaskNotifications = functions.pubsub
           if (queueOperations.length >= queueBatchSize) {
             await drainQueuedOperations(queueOperations, {
               phase: "schedule",
-              userId,
+              userRef: pseudonymizeLogIdentifier("uid", userId),
             });
           }
         }
@@ -708,6 +867,25 @@ export const sendQueuedNotifications = functions.pubsub
     }
 
     await drainQueuedOperations(dispatchOperations, { phase: "dispatch_flush" });
+    return null;
+  });
+
+export const scanNotificationDeadLetterBacklog = functions.pubsub
+  .schedule("every 24 hours")
+  .onRun(async () => {
+    const cutoff = admin.firestore.Timestamp.fromMillis(Date.now() - 24 * 60 * 60 * 1000);
+    const snapshot = await db
+      .collection(Collections.notificationDeadLetter)
+      .where("deadLetteredAt", "<=", cutoff)
+      .limit(100)
+      .get();
+
+    if (!snapshot.empty) {
+      functions.logger.warn("notification_dead_letter_backlog", {
+        count: snapshot.size,
+      });
+    }
+
     return null;
   });
 
@@ -807,5 +985,9 @@ export const __private__ = {
   isPermanentMessagingErrorCode,
   queueDocumentID,
   buildNotificationAttemptLog,
+  buildQueuedNotificationFailureLog,
+  buildNotificationDeadLetterRecord,
+  persistTerminalNotificationFailure,
+  pseudonymizeLogIdentifier,
   invalidTokensFromMessagingResponses,
 };

@@ -1,5 +1,6 @@
 import * as admin from "firebase-admin";
 import * as functions from "firebase-functions";
+import { createHmac } from "crypto";
 
 if (admin.apps.length === 0) {
   admin.initializeApp();
@@ -12,6 +13,7 @@ const ALLOWED_IMAGE_CONTENT_TYPES = new Set([
   "image/gif",
   "image/webp",
 ]);
+const LOG_PSEUDONYMIZATION_KEY = "LOG_PSEUDONYMIZATION_KEY";
 
 function isProfileImagePath(filePath?: string): boolean {
   if (!filePath) return false;
@@ -28,6 +30,26 @@ function isImageContentType(contentType?: string): boolean {
     .toLowerCase();
   return ALLOWED_IMAGE_CONTENT_TYPES.has(normalized);
 }
+
+function logPseudonymizationKey(): string {
+  return (
+    process.env.LOG_PSEUDONYMIZATION_KEY ||
+    functions.config()?.logging?.pseudonymization_key ||
+    LOG_PSEUDONYMIZATION_KEY
+  );
+}
+
+function pseudonymizeLogIdentifier(prefix: string, value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim();
+  if (!normalized) return undefined;
+  const digest = createHmac("sha256", logPseudonymizationKey()).update(normalized).digest("hex");
+  return `${prefix}:${digest.slice(0, 12)}`;
+}
+
+export const __private__ = {
+  pseudonymizeLogIdentifier,
+};
 
 /**
  * Lightweight storage hook:
@@ -59,10 +81,12 @@ export const processProfilePicture = functions.storage.object().onFinalize(async
       },
     });
 
-    functions.logger.info("Profile image metadata normalized", { filePath });
+    functions.logger.info("Profile image metadata normalized", {
+      fileRef: pseudonymizeLogIdentifier("file", filePath),
+    });
   } catch (error) {
     functions.logger.error("Failed to process profile image", {
-      filePath,
+      fileRef: pseudonymizeLogIdentifier("file", filePath),
       error: error instanceof Error ? error.message : "unknown_error",
     });
   }
@@ -82,7 +106,9 @@ export const cleanupUserStorage = functions.auth.user().onDelete(async (user) =>
     });
 
     if (files.length === 0) {
-      functions.logger.info("No storage files found for deleted user", { userId });
+      functions.logger.info("No storage files found for deleted user", {
+        userRef: pseudonymizeLogIdentifier("uid", userId),
+      });
       return;
     }
 
@@ -101,7 +127,7 @@ export const cleanupUserStorage = functions.auth.user().onDelete(async (user) =>
         } else {
           failedCount += 1;
           functions.logger.warn("User storage file delete failed", {
-            userId,
+            userRef: pseudonymizeLogIdentifier("uid", userId),
             error: result.reason instanceof Error ? result.reason.message : "unknown_error",
           });
         }
@@ -110,20 +136,20 @@ export const cleanupUserStorage = functions.auth.user().onDelete(async (user) =>
 
     if (failedCount > 0) {
       functions.logger.warn("Deleted user storage with partial failures", {
-        userId,
+        userRef: pseudonymizeLogIdentifier("uid", userId),
         deletedCount,
         failedCount,
         totalCount: files.length,
       });
     } else {
       functions.logger.info("Deleted storage files for user", {
-        userId,
+        userRef: pseudonymizeLogIdentifier("uid", userId),
         count: deletedCount,
       });
     }
   } catch (error) {
     functions.logger.error("Failed to cleanup user storage", {
-      userId,
+      userRef: pseudonymizeLogIdentifier("uid", userId),
       error: error instanceof Error ? error.message : "unknown_error",
     });
   }

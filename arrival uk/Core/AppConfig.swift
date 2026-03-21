@@ -87,16 +87,16 @@ struct LegalConfiguration {
 struct NetworkTrustConfiguration {
     let enforcePinning: Bool
     let allowUnpinnedHosts: Bool
-    let pinnedCertificateHashesByHost: [String: Set<String>]
+    let intermediateCAPinHashesByHost: [String: Set<String>]
     let explicitlyAllowedUnpinnedHosts: Set<String>
 
-    func pinnedHashes(for host: String) -> Set<String> {
+    func intermediateCAPinHashes(for host: String) -> Set<String> {
         let normalizedHost = host.lowercased()
-        if let direct = pinnedCertificateHashesByHost[normalizedHost] {
+        if let direct = intermediateCAPinHashesByHost[normalizedHost] {
             return direct
         }
 
-        for (configuredHost, hashes) in pinnedCertificateHashesByHost {
+        for (configuredHost, hashes) in intermediateCAPinHashesByHost {
             guard configuredHost.hasPrefix("*.") else { continue }
             let suffix = String(configuredHost.dropFirst(1))
             if normalizedHost.hasSuffix(suffix) {
@@ -152,6 +152,21 @@ enum AppConfig {
         return Int(raw.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
+    private static func boolOverride(_ key: String) -> Bool? {
+        guard let raw = environmentOverride(key)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {
+            return nil
+        }
+
+        switch raw {
+        case "1", "true", "yes", "on":
+            return true
+        case "0", "false", "no", "off":
+            return false
+        default:
+            return nil
+        }
+    }
+
     private static func stringSetOverride(_ key: String) -> Set<String> {
         guard let raw = environmentOverride(key) else { return [] }
         return Set(
@@ -174,6 +189,39 @@ enum AppConfig {
         return parsed
     }
 
+    private static func missingRequiredConfigMessage(for key: String) -> String {
+        "Missing required config: \(key). Set \(key) in the active xcconfig. App cannot start safely without this value."
+    }
+
+    private static func logDebugConfigurationFallback(for key: String, stubDescription: String) {
+        #if DEBUG
+        NSLog("AppConfig debug fallback for %@. Using %@.", key, stubDescription)
+        #endif
+    }
+
+    private static func requiredConfigString(_ key: String, debugStubValue: String) -> String {
+        if let trimmed = environmentOverride(key)?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !trimmed.isEmpty {
+            return trimmed
+        }
+
+        #if DEBUG
+        logDebugConfigurationFallback(for: key, stubDescription: "stub value")
+        return debugStubValue
+        #else
+        fatalError(missingRequiredConfigMessage(for: key))
+        #endif
+    }
+
+    private static func derivedCollaborationWebSocketURL(from baseURL: URL) -> URL? {
+        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        components.scheme = (components.scheme?.lowercased() == "https") ? "wss" : "ws"
+        components.path = "/v1/collaboration/realtime"
+        return components.url
+    }
+
     private static var legalBaseURL: URL {
         httpsURLOverride("ARRIVAL_LEGAL_BASE_URL") ?? RegionRuntime.legalBaseURL
     }
@@ -183,6 +231,19 @@ enum AppConfig {
     }
 
     static var environment: AppEnvironment { .current }
+
+    static func validateRequiredConfiguration() {
+        _ = applePayMerchantID
+        if collaborationRealtimeEnabled {
+            _ = collaborationWebSocketURL
+        }
+        _ = networkTrust
+    }
+
+    /// Realtime collaboration stays fail-closed until a room-scoped backend is explicitly enabled.
+    static var collaborationRealtimeEnabled: Bool {
+        boolOverride("ARRIVAL_ENABLE_COLLABORATION_REALTIME") ?? false
+    }
 
     static var apiBaseURL: URL {
         if let override = httpsURLOverride("ARRIVAL_API_BASE_URL") {
@@ -219,29 +280,44 @@ enum AppConfig {
             .appendingPathComponent("confirm")
     }
 
-    static var applePayMerchantID: String? {
-        let trimmed = environmentOverride("ARRIVAL_APPLE_PAY_MERCHANT_ID")?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let trimmed, !trimmed.isEmpty else { return nil }
-        return trimmed
+    /// Release builds no longer return nil silently here: startup validation forces a fatal error,
+    /// while DEBUG builds fall back to a documented stub merchant identifier.
+    static var applePayMerchantID: String {
+        requiredConfigString("ARRIVAL_APPLE_PAY_MERCHANT_ID", debugStubValue: "merchant.debug.arrivaluk")
     }
 
-    static var collaborationWebSocketURL: URL? {
+    /// Release builds no longer return nil silently here: startup validation forces a fatal error,
+    /// while DEBUG builds fall back to a deterministic websocket stub so local builds stay runnable.
+    static var collaborationWebSocketURL: URL {
         if let override = environmentOverride("ARRIVAL_COLLAB_WS_URL") {
             let trimmed = override.trimmingCharacters(in: .whitespacesAndNewlines)
             if let parsed = URL(string: trimmed),
-               let scheme = parsed.scheme?.lowercased(),
-               scheme == "wss" || (scheme == "ws" && environment == .development) {
-                return parsed
+               let scheme = parsed.scheme?.lowercased() {
+                #if DEBUG
+                if scheme == "wss" || scheme == "ws" {
+                    return parsed
+                }
+                #else
+                if scheme == "wss" {
+                    return parsed
+                }
+                #endif
             }
         }
 
-        guard var components = URLComponents(url: apiBaseURL, resolvingAgainstBaseURL: false) else {
-            return nil
+        #if DEBUG
+        if let derived = derivedCollaborationWebSocketURL(from: apiBaseURL) {
+            logDebugConfigurationFallback(for: "ARRIVAL_COLLAB_WS_URL", stubDescription: derived.absoluteString)
+            return derived
         }
-        components.scheme = (components.scheme?.lowercased() == "https") ? "wss" : "ws"
-        components.path = "/v1/collaboration/realtime"
-        return components.url
+        logDebugConfigurationFallback(for: "ARRIVAL_COLLAB_WS_URL", stubDescription: "ws://localhost:8080/v1/collaboration/realtime")
+        guard let debugStubURL = URL(string: "ws://localhost:8080/v1/collaboration/realtime") else {
+            fatalError("Internal debug websocket stub URL is invalid.")
+        }
+        return debugStubURL
+        #else
+        fatalError(missingRequiredConfigMessage(for: "ARRIVAL_COLLAB_WS_URL"))
+        #endif
     }
 
     static var requestTimeout: TimeInterval {
@@ -307,32 +383,32 @@ enum AppConfig {
             "5v4iv0Xk8NO4XFngLA9JVBjh640yEPeI1IzV4ctUfNQ=",
             "PuAnjfcfo8ElxM1IfwHXdGlOb8V+DNlMJO/XaRM5GOU="
         ]
-        let firstPartyPins = stringSetOverride("ARRIVAL_API_PINNED_SPKI_HASHES")
-        if environment == .production && firstPartyPins.isEmpty {
+        let intermediateCAPinHashes = stringSetOverride("ARRIVAL_API_PINNED_SPKI_HASHES")
+        if environment == .production && intermediateCAPinHashes.isEmpty {
             fatalError("Missing ARRIVAL_API_PINNED_SPKI_HASHES for production network pinning.")
         }
 
         var pinnedHashesByHost: [String: Set<String>] = [
             "*.googleapis.com": googleCertificatePins
         ]
-        if !firstPartyPins.isEmpty {
-            pinnedHashesByHost["api.arrivaluk.app"] = firstPartyPins
-            pinnedHashesByHost["api-dev.arrivaluk.app"] = firstPartyPins
-            pinnedHashesByHost["api-staging.arrivaluk.app"] = firstPartyPins
-            pinnedHashesByHost["api.uk.arrival.com"] = firstPartyPins
-            pinnedHashesByHost["api.us.arrival.com"] = firstPartyPins
-            pinnedHashesByHost["api.ca.arrival.com"] = firstPartyPins
-            pinnedHashesByHost["api.au.arrival.com"] = firstPartyPins
-            pinnedHashesByHost["api.global.arrival.com"] = firstPartyPins
-            pinnedHashesByHost["*.arrivaluk.app"] = firstPartyPins
-            pinnedHashesByHost["*.arrival.com"] = firstPartyPins
+        if !intermediateCAPinHashes.isEmpty {
+            pinnedHashesByHost["api.arrivaluk.app"] = intermediateCAPinHashes
+            pinnedHashesByHost["api-dev.arrivaluk.app"] = intermediateCAPinHashes
+            pinnedHashesByHost["api-staging.arrivaluk.app"] = intermediateCAPinHashes
+            pinnedHashesByHost["api.uk.arrival.com"] = intermediateCAPinHashes
+            pinnedHashesByHost["api.us.arrival.com"] = intermediateCAPinHashes
+            pinnedHashesByHost["api.ca.arrival.com"] = intermediateCAPinHashes
+            pinnedHashesByHost["api.au.arrival.com"] = intermediateCAPinHashes
+            pinnedHashesByHost["api.global.arrival.com"] = intermediateCAPinHashes
+            pinnedHashesByHost["*.arrivaluk.app"] = intermediateCAPinHashes
+            pinnedHashesByHost["*.arrival.com"] = intermediateCAPinHashes
         }
 
         var explicitlyAllowedUnpinnedHosts: Set<String> = [
             "*.cloudfunctions.net",
             "*.firebaseio.com"
         ]
-        if environment != .production && firstPartyPins.isEmpty {
+        if environment != .production && intermediateCAPinHashes.isEmpty {
             explicitlyAllowedUnpinnedHosts.formUnion([
                 "api.arrivaluk.app",
                 "api-dev.arrivaluk.app",
@@ -350,7 +426,7 @@ enum AppConfig {
         return NetworkTrustConfiguration(
             enforcePinning: environment == .production,
             allowUnpinnedHosts: environment != .production,
-            pinnedCertificateHashesByHost: pinnedHashesByHost,
+            intermediateCAPinHashesByHost: pinnedHashesByHost,
             explicitlyAllowedUnpinnedHosts: explicitlyAllowedUnpinnedHosts
         )
     }

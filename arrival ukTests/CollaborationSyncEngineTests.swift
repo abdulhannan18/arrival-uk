@@ -99,6 +99,7 @@ final class CollaborationSyncEngineTests: XCTestCase {
     private func makeEngine(
         harness: Harness,
         transport: TestRealtimeTransport,
+        realtimeEnabled: Bool = true,
         sleepProvider: @escaping @Sendable (TimeInterval) async -> Void = { _ in },
         maximumReconnectAttempts: Int = 10
     ) -> CollaborationSyncEngine {
@@ -106,6 +107,7 @@ final class CollaborationSyncEngineTests: XCTestCase {
             defaults: harness.defaults,
             transport: transport,
             websocketURL: URL(string: "wss://example.com/realtime"),
+            realtimeEnabled: realtimeEnabled,
             sleepProvider: sleepProvider,
             jitterProvider: { 1.0 },
             notificationCenter: NotificationCenter(),
@@ -227,6 +229,29 @@ final class CollaborationSyncEngineTests: XCTestCase {
             ),
             snapshot: nil
         )
+    }
+
+    @MainActor
+    func testRealtimeDisabledDoesNotAttemptConnection() async throws {
+        let harness = try makeHarness()
+        defer { harness.cleanup() }
+
+        let transport = TestRealtimeTransport()
+        let engine = makeEngine(
+            harness: harness,
+            transport: transport,
+            realtimeEnabled: false
+        )
+
+        engine.configureIfNeeded()
+
+        let didSetFailedState = await waitUntil {
+            engine.connectionStateForTesting() == .failed(reason: "collaboration_realtime_disabled")
+        }
+        let connectAttempts = await transport.connectAttempts()
+
+        XCTAssertTrue(didSetFailedState)
+        XCTAssertEqual(connectAttempts, 0)
     }
 
     @MainActor

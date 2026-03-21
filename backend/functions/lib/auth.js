@@ -60,6 +60,7 @@ const TRACK_LOGIN_RATE_LIMIT_MAX = 60;
 const TRACK_LOGIN_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 const VERIFY_USER_RATE_LIMIT_MAX = 120;
 const VERIFY_USER_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
+const LOG_PSEUDONYMIZATION_KEY = "LOG_PSEUDONYMIZATION_KEY";
 function generateReferralCode() {
     // 12 hex chars = 48 bits of entropy (~281 trillion combinations).
     return (0, crypto_1.randomBytes)(6).toString("hex").toUpperCase();
@@ -150,12 +151,34 @@ function sanitizeAnalyticsProperties(value) {
     }
     return sanitized;
 }
+function logPseudonymizationKey() {
+    return (process.env.LOG_PSEUDONYMIZATION_KEY ||
+        functions.config()?.logging?.pseudonymization_key ||
+        LOG_PSEUDONYMIZATION_KEY);
+}
+function pseudonymizeLogIdentifier(prefix, value) {
+    if (typeof value !== "string")
+        return undefined;
+    const normalized = value.trim();
+    if (!normalized)
+        return undefined;
+    const digest = (0, crypto_1.createHmac)("sha256", logPseudonymizationKey()).update(normalized).digest("hex");
+    return `${prefix}:${digest.slice(0, 12)}`;
+}
+function sanitizedFailureKinds(failures) {
+    return failures
+        .map((failure) => failure.split(":")[0].split("/")[0].trim())
+        .filter(Boolean)
+        .slice(0, 20);
+}
 exports.__private__ = {
     generateReferralCode,
     normalizedPlatform,
     normalizedAppVersion,
     sanitizeAnalyticsEventType,
     sanitizeAnalyticsProperties,
+    pseudonymizeLogIdentifier,
+    sanitizedFailureKinds,
 };
 function wait(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -171,7 +194,7 @@ async function recursiveDeleteWithRetry(reference, maxAttempts = 3) {
         catch (error) {
             const isLastAttempt = attempt >= maxAttempts;
             functions.logger.warn("recursiveDelete attempt failed", {
-                path: reference.path,
+                pathRef: pseudonymizeLogIdentifier("path", reference.path),
                 attempt,
                 maxAttempts,
                 error: error instanceof Error ? error.message : "unknown_error",
@@ -230,7 +253,7 @@ async function cleanupUserScopedCollections(userId) {
     const ticketsDeleted = await deleteSupportTicketsForUser(userId);
     await db.collection(constants_1.Collections.admins).doc(userId).delete().catch(() => undefined);
     functions.logger.info("User scoped cleanup complete", {
-        userId,
+        userRef: pseudonymizeLogIdentifier("uid", userId),
         analyticsDeleted,
         referralsOwnedDeleted,
         referralsAttributedDeleted,
@@ -393,8 +416,8 @@ exports.onUserCreate = functions.auth.user().onCreate(async (user) => {
         emailDomain: user.email?.split("@")[1] ?? null,
     });
     functions.logger.info("User profile document initialized", {
-        userId: user.uid,
-        referralCode: initializedReferralCode,
+        userRef: pseudonymizeLogIdentifier("uid", user.uid),
+        referralRef: pseudonymizeLogIdentifier("ref", initializedReferralCode),
     });
 });
 exports.onUserDelete = functions.auth.user().onDelete(async (user) => {
@@ -402,11 +425,17 @@ exports.onUserDelete = functions.auth.user().onDelete(async (user) => {
     const failures = await runUserDeletionCleanup(userId);
     if (failures.length > 0) {
         await enqueueUserCleanupRetry(userId, failures);
-        functions.logger.error("User deletion cleanup failed", { userId, failures });
+        functions.logger.error("User deletion cleanup failed", {
+            userRef: pseudonymizeLogIdentifier("uid", userId),
+            failureCount: failures.length,
+            failureKinds: sanitizedFailureKinds(failures),
+        });
         throw new Error(`User cleanup incomplete for ${userId}`);
     }
     await userDeletionCleanupQueueRef(userId).delete().catch(() => undefined);
-    functions.logger.info("Deleted user and all associated data", { userId });
+    functions.logger.info("Deleted user and all associated data", {
+        userRef: pseudonymizeLogIdentifier("uid", userId),
+    });
 });
 exports.trackLogin = functions.https.onCall(async (data, context) => {
     if (!context.auth) {
@@ -555,7 +584,9 @@ exports.retryFailedUserCleanup = functions.pubsub
         const failures = await runUserDeletionCleanup(claim.userId);
         if (failures.length == 0) {
             await queued.ref.delete().catch(() => undefined);
-            functions.logger.info("Resolved queued user deletion cleanup", { userId: claim.userId });
+            functions.logger.info("Resolved queued user deletion cleanup", {
+                userRef: pseudonymizeLogIdentifier("uid", claim.userId),
+            });
             continue;
         }
         await queued.ref.set({
