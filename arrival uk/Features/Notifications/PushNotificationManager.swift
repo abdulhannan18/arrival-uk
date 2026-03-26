@@ -105,6 +105,7 @@ final class PushNotificationManager: NSObject, ObservableObject {
                 "platform": "ios",
                 "appVersion": appVersion,
                 "deviceId": resolvedInstallationID(),
+                "timeZone": TimeZone.current.identifier,
             ])
             UserDefaults.standard.removeObject(forKey: pendingFCMTokenStorageKey)
         } catch {

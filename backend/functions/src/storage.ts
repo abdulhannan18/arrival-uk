@@ -1,6 +1,6 @@
 import * as admin from "firebase-admin";
 import * as functions from "firebase-functions";
-import { createHmac } from "crypto";
+import { pseudonymizeLogIdentifier } from "./logPrivacy";
 
 if (admin.apps.length === 0) {
   admin.initializeApp();
@@ -13,8 +13,6 @@ const ALLOWED_IMAGE_CONTENT_TYPES = new Set([
   "image/gif",
   "image/webp",
 ]);
-const LOG_PSEUDONYMIZATION_KEY = "LOG_PSEUDONYMIZATION_KEY";
-
 function isProfileImagePath(filePath?: string): boolean {
   if (!filePath) return false;
   // Ownership is enforced by Firebase Storage Security Rules:
@@ -29,22 +27,6 @@ function isImageContentType(contentType?: string): boolean {
     .trim()
     .toLowerCase();
   return ALLOWED_IMAGE_CONTENT_TYPES.has(normalized);
-}
-
-function logPseudonymizationKey(): string {
-  return (
-    process.env.LOG_PSEUDONYMIZATION_KEY ||
-    functions.config()?.logging?.pseudonymization_key ||
-    LOG_PSEUDONYMIZATION_KEY
-  );
-}
-
-function pseudonymizeLogIdentifier(prefix: string, value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const normalized = value.trim();
-  if (!normalized) return undefined;
-  const digest = createHmac("sha256", logPseudonymizationKey()).update(normalized).digest("hex");
-  return `${prefix}:${digest.slice(0, 12)}`;
 }
 
 export const __private__ = {
@@ -99,39 +81,54 @@ export const cleanupUserStorage = functions.auth.user().onDelete(async (user) =>
   const userId = user.uid;
   const bucket = storage.bucket();
   const deleteBatchSize = 50;
+  const listPageSize = 200;
 
   try {
-    const [files] = await bucket.getFiles({
-      prefix: `users/${userId}/`,
-    });
+    let deletedCount = 0;
+    let failedCount = 0;
+    let listedCount = 0;
+    let pageToken: string | undefined;
 
-    if (files.length === 0) {
+    while (true) {
+      const [files, nextQuery] = await bucket.getFiles({
+        prefix: `users/${userId}/`,
+        autoPaginate: false,
+        maxResults: listPageSize,
+        pageToken,
+      });
+
+      listedCount += files.length;
+
+      for (let index = 0; index < files.length; index += deleteBatchSize) {
+        const batch = files.slice(index, index + deleteBatchSize);
+        const results = await Promise.allSettled(
+          batch.map((file) => file.delete({ ignoreNotFound: true }))
+        );
+
+        for (const result of results) {
+          if (result.status === "fulfilled") {
+            deletedCount += 1;
+          } else {
+            failedCount += 1;
+            functions.logger.warn("User storage file delete failed", {
+              userRef: pseudonymizeLogIdentifier("uid", userId),
+              error: result.reason instanceof Error ? result.reason.message : "unknown_error",
+            });
+          }
+        }
+      }
+
+      pageToken = typeof nextQuery?.pageToken === "string" ? nextQuery.pageToken : undefined;
+      if (!pageToken) {
+        break;
+      }
+    }
+
+    if (listedCount === 0) {
       functions.logger.info("No storage files found for deleted user", {
         userRef: pseudonymizeLogIdentifier("uid", userId),
       });
       return;
-    }
-
-    let deletedCount = 0;
-    let failedCount = 0;
-
-    for (let index = 0; index < files.length; index += deleteBatchSize) {
-      const batch = files.slice(index, index + deleteBatchSize);
-      const results = await Promise.allSettled(
-        batch.map((file) => file.delete({ ignoreNotFound: true }))
-      );
-
-      for (const result of results) {
-        if (result.status === "fulfilled") {
-          deletedCount += 1;
-        } else {
-          failedCount += 1;
-          functions.logger.warn("User storage file delete failed", {
-            userRef: pseudonymizeLogIdentifier("uid", userId),
-            error: result.reason instanceof Error ? result.reason.message : "unknown_error",
-          });
-        }
-      }
     }
 
     if (failedCount > 0) {
@@ -139,7 +136,7 @@ export const cleanupUserStorage = functions.auth.user().onDelete(async (user) =>
         userRef: pseudonymizeLogIdentifier("uid", userId),
         deletedCount,
         failedCount,
-        totalCount: files.length,
+        totalCount: listedCount,
       });
     } else {
       functions.logger.info("Deleted storage files for user", {

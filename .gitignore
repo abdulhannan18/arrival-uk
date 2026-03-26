@@ -75,5 +75,7 @@ docs/generated/
 
 # Backend local install artifacts
 backend/functions/node_modules/
+backend/functions/lib/
+backend/functions/*.tsbuildinfo
 backend/functions/.firebase/
 backend/functions/firestore-debug.log

@@ -13,7 +13,7 @@ struct ArrivalWalletControlWidget: ControlWidget {
                     ArrivalWidgetShared.walletDeepLinkURL(
                         shouldUnlock: true,
                         documentRawValue: "studentVisa"
-                    ) ?? URL(string: "arrivaluk://wallet?unlock=1")!
+                    )
                 )
             ) {
                 Label("Show BRP", systemImage: "person.text.rectangle")
@@ -31,9 +31,7 @@ struct ArrivalQuickTaskControlWidget: ControlWidget {
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: Self.kind) {
             ControlWidgetButton(
-                action: OpenURLIntent(
-                    ArrivalWidgetShared.quickTaskDeepLinkURL() ?? URL(string: "arrivaluk://quicktask")!
-                )
+                action: OpenURLIntent(ArrivalWidgetShared.quickTaskDeepLinkURL())
             ) {
                 Label("Quick Task", systemImage: "checklist.checked")
             }
@@ -50,9 +48,7 @@ struct ArrivalDiscountQRControlWidget: ControlWidget {
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: Self.kind) {
             ControlWidgetButton(
-                action: OpenURLIntent(
-                    ArrivalWidgetShared.discountQRDeepLinkURL() ?? URL(string: "arrivaluk://discountqr")!
-                )
+                action: OpenURLIntent(ArrivalWidgetShared.discountQRDeepLinkURL())
             ) {
                 Label("Discount QR", systemImage: "qrcode")
             }

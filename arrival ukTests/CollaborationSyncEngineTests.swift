@@ -255,6 +255,30 @@ final class CollaborationSyncEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testMissingJourneyIDFailsClosedInsteadOfUsingSharedDefaultRoom() async throws {
+        let harness = try makeHarness()
+        defer { harness.cleanup() }
+
+        let transport = TestRealtimeTransport()
+        let engine = makeEngine(
+            harness: harness,
+            transport: transport,
+            realtimeEnabled: true
+        )
+
+        engine.configureIfNeeded()
+
+        let didSetFailedState = await waitUntil {
+            engine.connectionStateForTesting() == .failed(reason: "missing_collaboration_room_id")
+        }
+        let connectAttempts = await transport.connectAttempts()
+
+        XCTAssertTrue(didSetFailedState)
+        XCTAssertEqual(connectAttempts, 0)
+        XCTAssertTrue(engine.activeRoomIDsForTesting().allSatisfy { $0.hasPrefix("local-") })
+    }
+
+    @MainActor
     func testMessagesFromRoomANotDeliveredToRoomBSubscriber() async throws {
         let harness = try makeHarness()
         defer { harness.cleanup() }

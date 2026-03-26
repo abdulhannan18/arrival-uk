@@ -422,7 +422,7 @@ final class TaskSyncStoreTests: XCTestCase {
             )
         }
         let store = try makeStore(harness: harness, transport: transport)
-        store.conflictResolutionStrategy = .lastWriteWinsByUpdatedAt
+        store.conflictResolutionStrategy = .clientWins
 
         store.recordCompletion(
             taskID: "task.sync.conflict.local",

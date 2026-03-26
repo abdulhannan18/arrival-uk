@@ -242,7 +242,11 @@ enum AppConfig {
 
     /// Realtime collaboration stays fail-closed until a room-scoped backend is explicitly enabled.
     static var collaborationRealtimeEnabled: Bool {
+        #if DEBUG
         boolOverride("ARRIVAL_ENABLE_COLLABORATION_REALTIME") ?? false
+        #else
+        false
+        #endif
     }
 
     static var apiBaseURL: URL {

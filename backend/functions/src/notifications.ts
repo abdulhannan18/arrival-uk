@@ -1,8 +1,9 @@
 import * as admin from "firebase-admin";
 import * as functions from "firebase-functions";
-import { createHash, createHmac } from "crypto";
+import { createHash } from "crypto";
 import { assertCallableAppCheck } from "./utils/appCheck";
 import { Collections, TaskTiming } from "./constants";
+import { pseudonymizeLogIdentifier } from "./logPrivacy";
 
 if (admin.apps.length === 0) {
   admin.initializeApp();
@@ -16,11 +17,12 @@ const APP_VERSION_PATTERN = /^[0-9A-Za-z._-]{1,32}$/;
 const DEVICE_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const MAX_DEVICE_TOKEN_LENGTH = 4096;
 const MAX_DEVICE_DOCUMENTS_PER_USER = 50;
+const MAX_TIMEZONE_LENGTH = 64;
 const MAX_NOTIFICATION_RETRY_ATTEMPTS = 5;
 const NOTIFICATION_RETRY_DELAYS_MINUTES = [5, 15, 60, 180, 720];
 const MAX_NOTIFICATION_ERROR_LENGTH = 240;
 const DEVICE_TOKEN_QUERY_BATCH_SIZE = 10;
-const LOG_PSEUDONYMIZATION_KEY = "LOG_PSEUDONYMIZATION_KEY";
+const DEFAULT_REMINDER_TIMEZONE = "Europe/London";
 const PERMANENT_MESSAGING_ERROR_CODES = new Set<string>([
   "messaging/invalid-registration-token",
   "messaging/registration-token-not-registered",
@@ -35,6 +37,7 @@ type TaskReminderRecord = {
   data: Record<string, string>;
   scheduledFor: admin.firestore.Timestamp;
   sent: boolean;
+  remainingTokens?: string[];
   sentAt?: admin.firestore.Timestamp;
   error?: string;
   retryCount?: number;
@@ -136,6 +139,18 @@ function normalizedDeviceID(value: unknown): string | null {
   return DEVICE_ID_PATTERN.test(normalized) ? normalized : null;
 }
 
+function normalizedTimeZone(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().slice(0, MAX_TIMEZONE_LENGTH);
+  if (!normalized) return null;
+  try {
+    new Intl.DateTimeFormat("en-GB", { timeZone: normalized }).format(new Date());
+    return normalized;
+  } catch {
+    return null;
+  }
+}
+
 function fallbackDeviceIDFromToken(token: string): string {
   const digest = createHash("sha256").update(token).digest("hex");
   return `legacy_${digest.slice(0, 24)}`;
@@ -150,24 +165,6 @@ function completedTaskSetFromUserData(userData: admin.firestore.DocumentData): S
 function queueDocumentID(userId: string, taskId: string, sendAt: Date): string {
   const dayKey = sendAt.toISOString().slice(0, 10);
   return `${userId}_${taskId}_${dayKey}`.replace(/[^A-Za-z0-9_-]/g, "_");
-}
-
-function logPseudonymizationKey(): string | null {
-  const configured = (
-    process.env.LOG_PSEUDONYMIZATION_KEY ||
-    functions.config()?.logging?.pseudonymization_key
-  ) as string | undefined;
-  const normalized = configured?.trim() ?? "";
-  return normalized.length > 0 ? normalized : null;
-}
-
-function pseudonymizeLogIdentifier(prefix: string, value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const normalized = value.trim();
-  const key = logPseudonymizationKey();
-  if (!normalized || !key) return undefined;
-  const digest = createHmac("sha256", key).update(normalized).digest("hex");
-  return `${prefix}:${digest.slice(0, 12)}`;
 }
 
 function buildNotificationAttemptLog(
@@ -190,6 +187,130 @@ function buildNotificationAttemptLog(
   return Object.fromEntries(
     Object.entries(payload).filter(([, value]) => value !== undefined)
   );
+}
+
+function classifyMessagingResponses(
+  tokens: string[],
+  responses: MessagingResponseLike[]
+): {
+  invalidTokens: string[];
+  retryableTokens: string[];
+  failedCodes: string[];
+} {
+  const invalidTokens: string[] = [];
+  const retryableTokens: string[] = [];
+  const failedCodes: string[] = [];
+
+  responses.forEach((result, index) => {
+    if (result.success) return;
+    const code = extractMessagingErrorCode(result.error);
+    if (code) failedCodes.push(code);
+    if (isPermanentMessagingErrorCode(code)) {
+      if (tokens[index]) {
+        invalidTokens.push(tokens[index]);
+      }
+      return;
+    }
+    if (tokens[index]) {
+      retryableTokens.push(tokens[index]);
+    }
+  });
+
+  return { invalidTokens, retryableTokens, failedCodes };
+}
+
+function localDateParts(date: Date, timeZone: string): {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+} {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+
+  const value = (type: string): number => Number(parts.find((part) => part.type === type)?.value ?? "0");
+
+  return {
+    year: value("year"),
+    month: value("month"),
+    day: value("day"),
+    hour: value("hour"),
+    minute: value("minute"),
+    second: value("second"),
+  };
+}
+
+function utcDateForLocalTime(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  timeZone: string
+): Date {
+  let guess = new Date(Date.UTC(year, month - 1, day, hour, minute, 0));
+
+  for (let iteration = 0; iteration < 4; iteration += 1) {
+    const current = localDateParts(guess, timeZone);
+    const desiredMs = Date.UTC(year, month - 1, day, hour, minute, 0);
+    const currentMs = Date.UTC(
+      current.year,
+      current.month - 1,
+      current.day,
+      current.hour,
+      current.minute,
+      current.second
+    );
+    const diff = desiredMs - currentMs;
+    if (diff === 0) {
+      return guess;
+    }
+    guess = new Date(guess.getTime() + diff);
+  }
+
+  return guess;
+}
+
+function nextReminderDate(now: Date, timeZone: string): Date {
+  const current = localDateParts(now, timeZone);
+  const targetBase = new Date(Date.UTC(current.year, current.month - 1, current.day, 0, 0, 0));
+  if (current.hour >= 9) {
+    targetBase.setUTCDate(targetBase.getUTCDate() + 1);
+  }
+  return utcDateForLocalTime(
+    targetBase.getUTCFullYear(),
+    targetBase.getUTCMonth() + 1,
+    targetBase.getUTCDate(),
+    9,
+    0,
+    timeZone
+  );
+}
+
+function daysUntilDateInTimeZone(now: Date, targetDate: Date, timeZone: string): number {
+  const current = localDateParts(now, timeZone);
+  const target = localDateParts(targetDate, timeZone);
+
+  const currentDay = Date.UTC(current.year, current.month - 1, current.day, 0, 0, 0);
+  const targetDay = Date.UTC(target.year, target.month - 1, target.day, 0, 0, 0);
+
+  return Math.round((targetDay - currentDay) / (1000 * 60 * 60 * 24));
+}
+
+function preferredReminderTimeZone(userData: admin.firestore.DocumentData): string {
+  return normalizedTimeZone(userData?.profile?.timeZone)
+    ?? normalizedTimeZone(userData?.metadata?.timeZone)
+    ?? DEFAULT_REMINDER_TIMEZONE;
 }
 
 function isAlreadyExistsError(error: unknown): boolean {
@@ -240,9 +361,9 @@ function buildNotificationDeadLetterRecord(
     deadLetteredAt,
     payload: {
       type: notification.type,
-      title: notification.title,
-      body: notification.body,
-      data: { ...notification.data },
+      title: "redacted",
+      body: "redacted",
+      data: {},
     },
   };
 }
@@ -359,6 +480,7 @@ async function syncLegacyTokenFromDevices(
 
   const metadataPatch = {
     metadata: {
+      timeZone: admin.firestore.FieldValue.delete(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     },
   };
@@ -372,6 +494,7 @@ async function syncLegacyTokenFromDevices(
   }
 
   const fallbackToken = safeString(firstDevice.docs[0].data()?.fcmToken, "");
+  const fallbackTimeZone = normalizedTimeZone(firstDevice.docs[0].data()?.timeZone);
   if (!fallbackToken) {
     await userRef.set({
       ...metadataPatch,
@@ -381,8 +504,11 @@ async function syncLegacyTokenFromDevices(
   }
 
   await userRef.set({
-    ...metadataPatch,
     fcmToken: fallbackToken,
+    metadata: {
+      timeZone: fallbackTimeZone ?? admin.firestore.FieldValue.delete(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
   }, { merge: true });
 }
 
@@ -473,7 +599,8 @@ async function scheduleNotificationRetry(
   notification: TaskReminderRecord,
   nextRetryCount: number,
   reason: string,
-  failureCode: string | null = null
+  failureCode: string | null = null,
+  remainingTokens?: string[]
 ): Promise<void> {
   const message = truncateErrorMessage(reason || "notification_send_failed");
   if (nextRetryCount >= MAX_NOTIFICATION_RETRY_ATTEMPTS) {
@@ -496,6 +623,7 @@ async function scheduleNotificationRetry(
     retryCount: nextRetryCount,
     scheduledFor: retryAt,
     error: message,
+    remainingTokens: remainingTokens && remainingTokens.length > 0 ? remainingTokens : admin.firestore.FieldValue.delete(),
     lastAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
   });
 }
@@ -527,7 +655,9 @@ async function processQueuedNotification(
   const retryCount = normalizedRetryCount(notif.retryCount);
 
   try {
-    const tokens = await tokensForUser(notif.userId);
+    const tokens = Array.isArray(notif.remainingTokens) && notif.remainingTokens.length > 0
+      ? notif.remainingTokens
+      : await tokensForUser(notif.userId);
 
     if (tokens.length === 0) {
       functions.logger.info("notification_delivery", buildNotificationAttemptLog(
@@ -563,21 +693,18 @@ async function processQueuedNotification(
       },
     });
 
-    const failedCodes: string[] = [];
-    const invalidTokens = invalidTokensFromMessagingResponses(tokens, response.responses);
-    response.responses.forEach((result, index) => {
-      if (result.success) return;
-
-      const code = extractMessagingErrorCode(result.error);
-      if (code) failedCodes.push(code);
-    });
+    const {
+      failedCodes,
+      invalidTokens,
+      retryableTokens,
+    } = classifyMessagingResponses(tokens, response.responses);
 
     if (invalidTokens.length > 0) {
       await removeInvalidTokensForUser(notif.userId, invalidTokens);
       invalidateTokenCacheForUser(notif.userId);
     }
 
-    if (response.successCount > 0) {
+    if (response.successCount === tokens.length || (response.successCount > 0 && retryableTokens.length === 0)) {
       functions.logger.info("notification_delivery", buildNotificationAttemptLog(
         notifDoc.id,
         notif.userId,
@@ -589,6 +716,7 @@ async function processQueuedNotification(
         sentAt: admin.firestore.FieldValue.serverTimestamp(),
         error: admin.firestore.FieldValue.delete(),
         retryCount: admin.firestore.FieldValue.delete(),
+        remainingTokens: admin.firestore.FieldValue.delete(),
         lastAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
       });
       return;
@@ -620,7 +748,8 @@ async function processQueuedNotification(
       notif,
       retryCount + 1,
       failedCodes[0] ?? "notification_send_failed",
-      failedCodes[0] ?? null
+      failedCodes[0] ?? null,
+      retryableTokens
     );
     functions.logger.warn("notification_delivery", buildNotificationAttemptLog(
       notifDoc.id,
@@ -645,7 +774,14 @@ async function processQueuedNotification(
       return;
     }
 
-    await scheduleNotificationRetry(notifDoc, notif, retryCount + 1, message, code);
+    await scheduleNotificationRetry(
+      notifDoc,
+      notif,
+      retryCount + 1,
+      message,
+      code,
+      undefined
+    );
     functions.logger.warn("notification_delivery", buildNotificationAttemptLog(
       notifDoc.id,
       notif.userId,
@@ -666,16 +802,11 @@ async function processQueuedNotification(
 async function queueReminder(
   userId: string,
   task: ContentTask,
-  daysUntilArrival: number
+  daysUntilArrival: number,
+  timeZone: string
 ): Promise<void> {
   const now = new Date();
-  const sendAt = new Date(now);
-  sendAt.setHours(9, 0, 0, 0);
-
-  // If it's already past 9AM local, push to tomorrow.
-  if (sendAt <= now) {
-    sendAt.setDate(sendAt.getDate() + 1);
-  }
+  const sendAt = nextReminderDate(now, timeZone);
 
   const title = task.priority?.toLowerCase() === "must do" ? "⚠️ Important task" : "Task reminder";
   const body = safeString(task.title, "You have an upcoming checklist task.");
@@ -767,9 +898,8 @@ export const scheduleTaskNotifications = functions.pubsub
         if (!arrivalTs) continue;
 
         const arrivalDate = arrivalTs.toDate();
-        const daysUntilArrival = Math.ceil(
-          (arrivalDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
-        );
+        const timeZone = preferredReminderTimeZone(userData);
+        const daysUntilArrival = daysUntilDateInTimeZone(now, arrivalDate, timeZone);
 
         const completedSet = completedTaskSetFromUserData(userData);
 
@@ -781,7 +911,7 @@ export const scheduleTaskNotifications = functions.pubsub
           const shouldRemind = daysUntilArrival <= dueDays && daysUntilArrival >= dueDays - 1;
           if (!shouldRemind) continue;
 
-          queueOperations.push(queueReminder(userId, task, daysUntilArrival));
+          queueOperations.push(queueReminder(userId, task, daysUntilArrival, timeZone));
           if (queueOperations.length >= queueBatchSize) {
             await drainQueuedOperations(queueOperations, {
               phase: "schedule",
@@ -909,6 +1039,7 @@ export const registerDeviceToken = functions.https.onCall(async (data, context) 
   }
   const appVersion = normalizedAppVersion(data?.appVersion);
   const deviceID = normalizedDeviceID(data?.deviceId) ?? fallbackDeviceIDFromToken(token);
+  const timeZone = normalizedTimeZone(data?.timeZone);
 
   const userRef = db.collection(Collections.users).doc(context.auth.uid);
   const deviceRef = userRef.collection(Collections.devices).doc(deviceID);
@@ -920,6 +1051,7 @@ export const registerDeviceToken = functions.https.onCall(async (data, context) 
       fcmToken: token,
       platform,
       appVersion,
+      timeZone: timeZone ?? admin.firestore.FieldValue.delete(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
     if (!existing.exists) {
@@ -932,6 +1064,7 @@ export const registerDeviceToken = functions.https.onCall(async (data, context) 
       metadata: {
         platform,
         appVersion,
+        timeZone: timeZone ?? admin.firestore.FieldValue.delete(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
     }, { merge: true });
@@ -958,6 +1091,7 @@ export const unregisterDeviceToken = functions.https.onCall(async (data, context
     await userRef.set({
       fcmToken: admin.firestore.FieldValue.delete(),
       metadata: {
+        timeZone: admin.firestore.FieldValue.delete(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
     }, { merge: true });
@@ -981,6 +1115,7 @@ export const __private__ = {
   normalizedPlatform,
   normalizedAppVersion,
   normalizedDeviceID,
+  normalizedTimeZone,
   retryDelayMsForAttempt,
   isPermanentMessagingErrorCode,
   queueDocumentID,
@@ -990,4 +1125,8 @@ export const __private__ = {
   persistTerminalNotificationFailure,
   pseudonymizeLogIdentifier,
   invalidTokensFromMessagingResponses,
+  classifyMessagingResponses,
+  daysUntilDateInTimeZone,
+  nextReminderDate,
+  preferredReminderTimeZone,
 };

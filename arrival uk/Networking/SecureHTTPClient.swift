@@ -34,6 +34,7 @@ final class SecureHTTPClient: NSObject, URLSessionDelegate {
 
     private let sessionConfiguration: URLSessionConfiguration
     private let authorizer: any SecureHTTPRequestAuthorizing
+    private let honorsConfigurationTimeouts: Bool
     private lazy var session: URLSession = {
         URLSession(
             configuration: sessionConfiguration,
@@ -44,18 +45,30 @@ final class SecureHTTPClient: NSObject, URLSessionDelegate {
 
     init(
         configuration: URLSessionConfiguration = .default,
-        authorizer: (any SecureHTTPRequestAuthorizing)? = nil
+        authorizer: (any SecureHTTPRequestAuthorizing)? = nil,
+        honorsConfigurationTimeouts: Bool = false
     ) {
         let config = (configuration.copy() as? URLSessionConfiguration) ?? .default
-        config.timeoutIntervalForRequest = AppConfig.requestTimeout
-        config.timeoutIntervalForResource = AppConfig.resourceTimeout
+        if !honorsConfigurationTimeouts {
+            config.timeoutIntervalForRequest = AppConfig.requestTimeout
+            config.timeoutIntervalForResource = AppConfig.resourceTimeout
+        }
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.waitsForConnectivity = true
         config.tlsMinimumSupportedProtocolVersion = .TLSv12
         config.tlsMaximumSupportedProtocolVersion = .TLSv13
         self.sessionConfiguration = config
         self.authorizer = authorizer ?? DefaultSecureHTTPRequestAuthorizer()
+        self.honorsConfigurationTimeouts = honorsConfigurationTimeouts
         super.init()
+    }
+
+    var effectiveRequestTimeout: TimeInterval {
+        sessionConfiguration.timeoutIntervalForRequest
+    }
+
+    var effectiveResourceTimeout: TimeInterval {
+        sessionConfiguration.timeoutIntervalForResource
     }
 
     func request<Response: Decodable>(

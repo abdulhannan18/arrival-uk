@@ -176,6 +176,7 @@ final class CollaborationSyncEngine {
     private var reconnectAttempt = 0
     private var connectedAt: Date?
     private var presenceGraceTasks: [String: Task<Void, Never>] = [:]
+    private var hasExplicitJourneyID: Bool
 
     var connectionState: CollaborationConnectionState = .disconnected
     var journeyID: String
@@ -231,9 +232,10 @@ final class CollaborationSyncEngine {
 
         let persistedJourneyID = defaults.string(forKey: journeyIDKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedHasExplicitJourneyID = (persistedJourneyID?.isEmpty == false)
         let resolvedJourneyID = {
             guard let persistedJourneyID, !persistedJourneyID.isEmpty else {
-                return "default-journey"
+                return "local-\(resolvedActorID)"
             }
             return persistedJourneyID
         }()
@@ -261,6 +263,7 @@ final class CollaborationSyncEngine {
         lamportCounter = defaults.object(forKey: lamportCounterKey) as? Int64 ?? 0
         localDisplayName = StudentProfileStore.shared.preferredFirstName ?? "You"
         journeyID = resolvedJourneyID
+        hasExplicitJourneyID = resolvedHasExplicitJourneyID
         activeRoomIDs = persistedActiveRooms.isEmpty ? [resolvedJourneyID] : persistedActiveRooms.union([resolvedJourneyID])
         roomStatesByID = runtimeRooms
 
@@ -298,6 +301,7 @@ final class CollaborationSyncEngine {
         guard !normalized.isEmpty else { return }
 
         self.journeyID = normalized
+        self.hasExplicitJourneyID = true
         defaults.set(normalized, forKey: journeyIDKey)
         joinRoom(normalized)
         refreshPresenceSummary()
@@ -566,6 +570,10 @@ final class CollaborationSyncEngine {
     private func connectRealtimeChannelIfNeeded(forceReconnect: Bool) async {
         guard realtimeEnabled else {
             connectionState = .failed(reason: "collaboration_realtime_disabled")
+            return
+        }
+        guard hasExplicitJourneyID else {
+            connectionState = .failed(reason: "missing_collaboration_room_id")
             return
         }
 

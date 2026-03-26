@@ -75,6 +75,22 @@ test("pseudonymizeLogIdentifier does not contain raw user id", () => {
   }
 });
 
+test("pseudonymizeLogIdentifier requires a configured pseudonymization key", () => {
+  const previous = process.env.LOG_PSEUDONYMIZATION_KEY;
+  delete process.env.LOG_PSEUDONYMIZATION_KEY;
+
+  try {
+    const pseudonymized = __private__.pseudonymizeLogIdentifier("uid", "user-123");
+    assert.equal(pseudonymized, undefined);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.LOG_PSEUDONYMIZATION_KEY;
+    } else {
+      process.env.LOG_PSEUDONYMIZATION_KEY = previous;
+    }
+  }
+});
+
 test("sanitizedFailureKinds strips raw identifiers from cleanup failures", () => {
   const kinds = __private__.sanitizedFailureKinds([
     "users/user-123:permission_denied",

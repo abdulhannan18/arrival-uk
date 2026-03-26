@@ -106,6 +106,43 @@ test("stale push token removed on invalid registration", () => {
   assert.deepEqual(invalidTokens, ["stale-token"]);
 });
 
+test("partial delivery retries only transiently failed tokens", () => {
+  const classification = __private__.classifyMessagingResponses(
+    ["good-token", "stale-token", "retry-token"],
+    [
+      { success: true },
+      { success: false, error: { code: "messaging/registration-token-not-registered" } },
+      { success: false, error: { code: "messaging/internal-error" } },
+    ]
+  );
+
+  assert.deepEqual(classification.invalidTokens, ["stale-token"]);
+  assert.deepEqual(classification.retryableTokens, ["retry-token"]);
+  assert.deepEqual(classification.failedCodes, [
+    "messaging/registration-token-not-registered",
+    "messaging/internal-error",
+  ]);
+});
+
+test("preferred reminder timezone uses valid stored timezone metadata", () => {
+  assert.equal(__private__.normalizedTimeZone("Asia/Karachi"), "Asia/Karachi");
+  assert.equal(__private__.normalizedTimeZone("Not/A_Zone"), null);
+  assert.equal(
+    __private__.preferredReminderTimeZone({
+      metadata: { timeZone: "Asia/Karachi" },
+    }),
+    "Asia/Karachi"
+  );
+});
+
+test("daysUntilDateInTimeZone uses local calendar days instead of server time", () => {
+  const now = new Date("2026-03-22T20:30:00.000Z");
+  const arrival = new Date("2026-03-23T02:00:00.000Z");
+
+  assert.equal(__private__.daysUntilDateInTimeZone(now, arrival, "Asia/Karachi"), 0);
+  assert.equal(__private__.daysUntilDateInTimeZone(now, arrival, "Europe/London"), 1);
+});
+
 
 test("log output does not contain raw user id", () => {
   const previousKey = process.env.LOG_PSEUDONYMIZATION_KEY;
@@ -186,6 +223,12 @@ test("dead letter written after max retries", async () => {
     assert.equal(capturedRecord?.firstAttemptAt, firstAttemptAt);
     assert.equal(String(capturedRecord?.userId).includes("user_123"), false);
     assert.match(String(capturedRecord?.userId), /^uid:[0-9a-f]{12}$/);
+    assert.deepEqual(capturedRecord?.payload, {
+      type: "task_reminder",
+      title: "redacted",
+      body: "redacted",
+      data: {},
+    });
   } finally {
     if (previousKey === undefined) {
       delete process.env.LOG_PSEUDONYMIZATION_KEY;

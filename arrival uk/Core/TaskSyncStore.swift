@@ -92,6 +92,7 @@ struct TaskSyncConflictResolutionEvent: Identifiable, Hashable {
 enum TaskSyncConflictResolutionStrategy {
     case serverWins
     case clientWins
+    /// Deprecated for distributed correctness. This now aliases to server-authoritative resolution.
     case lastWriteWinsByUpdatedAt
     case manualResolution
 }
@@ -273,16 +274,10 @@ private struct TaskSyncHTTPTransport: TaskSyncTransport {
         request: TaskSyncBatchRequest,
         timeout: TaskSyncRequestTimeouts
     ) async throws -> TaskSyncBatchResponse {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = timeout.connectTimeout
-        configuration.timeoutIntervalForResource = timeout.requestTimeout
-        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        configuration.waitsForConnectivity = false
-
-        let client = SecureHTTPClient(configuration: configuration)
+        let configuration = makeTaskSyncSessionConfiguration(for: timeout)
+        let client = SecureHTTPClient(configuration: configuration, honorsConfigurationTimeouts: true)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
-
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
@@ -441,7 +436,7 @@ final class TaskSyncStore {
     var pendingUpdateCount = 0
     var syncState: TaskSyncLifecycleState = .idle
     var lastConflictEvent: TaskSyncConflictResolutionEvent?
-    var conflictResolutionStrategy: TaskSyncConflictResolutionStrategy = .lastWriteWinsByUpdatedAt
+    var conflictResolutionStrategy: TaskSyncConflictResolutionStrategy = .serverWins
 
     init(
         defaults: UserDefaults = .standard,
@@ -576,7 +571,7 @@ final class TaskSyncStore {
             }
 
             try context.save()
-            pendingUpdateCount = localPendingCount()
+            pendingUpdateCount = localPendingCount(existingContext: context)
         } catch let failure as TaskSyncFailure {
             syncState = .failed(failure)
         } catch {
@@ -704,8 +699,7 @@ final class TaskSyncStore {
 
         do {
             while !Task.isCancelled {
-                let pendingOperations = try fetchPendingOperations(context: context)
-                guard let operation = pendingOperations.first else {
+                guard let operation = try fetchNextPendingOperation(context: context) else {
                     pendingUpdateCount = 0
                     syncState = .idle
                     return
@@ -726,7 +720,7 @@ final class TaskSyncStore {
                         context: context
                     )
                     try context.save()
-                    pendingUpdateCount = localPendingCount()
+                    pendingUpdateCount = try pendingOperationCount(context: context)
                     syncState = pendingUpdateCount == 0 ? .idle : .syncing
                 } catch {
                     let failure = mapFailure(error)
@@ -754,7 +748,7 @@ final class TaskSyncStore {
                         operation: operation,
                         context: context
                     )
-                    pendingUpdateCount = localPendingCount()
+                    pendingUpdateCount = try pendingOperationCount(context: context)
                     if shouldContinue {
                         continue
                     }
@@ -852,15 +846,9 @@ final class TaskSyncStore {
             syncState = .syncing
             return true
         case .lastWriteWinsByUpdatedAt:
-            if localVersion.updatedAt >= remoteVersion.updatedAt {
-                try requeueClientVersion(after: remoteVersion, operation: operation, context: context)
-                syncState = .syncing
-                return true
-            } else {
-                try applyServerVersion(remoteVersion, for: operation, context: context)
-                syncState = .idle
-                return true
-            }
+            try applyServerVersion(remoteVersion, for: operation, context: context)
+            syncState = .idle
+            return true
         }
     }
 
@@ -912,7 +900,7 @@ final class TaskSyncStore {
         entity.lastOperationID = operation.operationID
         context.delete(operation)
         try context.save()
-        pendingUpdateCount = localPendingCount()
+        pendingUpdateCount = localPendingCount(existingContext: context)
     }
 
     private func requeueClientVersion(
@@ -931,7 +919,7 @@ final class TaskSyncStore {
         operation.retryCount = 0
         operation.lastErrorMessage = nil
         try context.save()
-        pendingUpdateCount = localPendingCount()
+        pendingUpdateCount = localPendingCount(existingContext: context)
     }
 
     private func buildBatchRequest(for operation: TaskSyncOperationEntity) -> TaskSyncBatchRequest {
@@ -972,7 +960,7 @@ final class TaskSyncStore {
             throw TaskSyncFailure.storage("missing_task_sync_container")
         }
 
-        let pendingCount = try fetchPendingOperations(context: context).count
+        let pendingCount = try pendingOperationCount(context: context)
         guard pendingCount < queueLimit else {
             throw TaskSyncFailure.queueOverflow
         }
@@ -1021,7 +1009,7 @@ final class TaskSyncStore {
         entity.lastOperationID = operation.operationID
         context.insert(operation)
         try context.save()
-        pendingUpdateCount = localPendingCount()
+        pendingUpdateCount = localPendingCount(existingContext: context)
     }
 
     private func fetchOrCreateTaskEntity(
@@ -1126,10 +1114,22 @@ final class TaskSyncStore {
         )
     }
 
-    private func localPendingCount() -> Int {
-        guard let context = makeContext() else { return 0 }
+    private func fetchNextPendingOperation(context: ModelContext) throws -> TaskSyncOperationEntity? {
+        var descriptor = FetchDescriptor<TaskSyncOperationEntity>(
+            sortBy: [SortDescriptor(\TaskSyncOperationEntity.ordinal)]
+        )
+        descriptor.fetchLimit = 1
+        return try context.fetch(descriptor).first
+    }
+
+    private func pendingOperationCount(context: ModelContext) throws -> Int {
+        try context.fetchCount(FetchDescriptor<TaskSyncOperationEntity>())
+    }
+
+    private func localPendingCount(existingContext: ModelContext? = nil) -> Int {
+        guard let context = existingContext ?? makeContext() else { return 0 }
         do {
-            return try fetchPendingOperations(context: context).count
+            return try pendingOperationCount(context: context)
         } catch {
             CrashReporter.record(error: error, context: "task_sync_pending_count")
             return 0

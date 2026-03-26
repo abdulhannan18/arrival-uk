@@ -202,6 +202,45 @@ final class SecurityConfigurationTests: XCTestCase {
             XCTFail("Unexpected error: \(error)")
         }
     }
+
+    func testSecureHTTPClientUsesAppConfigTimeoutsByDefault() {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 3
+        configuration.timeoutIntervalForResource = 7
+
+        let client = SecureHTTPClient(
+            configuration: configuration,
+            authorizer: FixedAuthorizationHeaderProvider(headers: [:])
+        )
+
+        XCTAssertEqual(client.effectiveRequestTimeout, AppConfig.requestTimeout)
+        XCTAssertEqual(client.effectiveResourceTimeout, AppConfig.resourceTimeout)
+    }
+
+    func testSecureHTTPClientCanHonorProvidedTimeouts() {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 10
+        configuration.timeoutIntervalForResource = 30
+
+        let client = SecureHTTPClient(
+            configuration: configuration,
+            authorizer: FixedAuthorizationHeaderProvider(headers: [:]),
+            honorsConfigurationTimeouts: true
+        )
+
+        XCTAssertEqual(client.effectiveRequestTimeout, 10)
+        XCTAssertEqual(client.effectiveResourceTimeout, 30)
+    }
+
+    func testTaskSyncTransportUsesRequestTimeoutAsEffectiveSessionCap() {
+        let configuration = makeTaskSyncSessionConfiguration(
+            for: TaskSyncRequestTimeouts(connectTimeout: 10, requestTimeout: 30)
+        )
+
+        XCTAssertEqual(configuration.timeoutIntervalForRequest, 30)
+        XCTAssertEqual(configuration.timeoutIntervalForResource, 30)
+        XCTAssertFalse(configuration.waitsForConnectivity)
+    }
 }
 
 private struct FixedAuthorizationHeaderProvider: SecureHTTPRequestAuthorizing {

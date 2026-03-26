@@ -219,45 +219,74 @@ jobs:
         id: pick_sim
         run: |
           set -euo pipefail
-          SIM_NAME="$(xcrun simctl list devices available \
-            | awk -F '[()]' '/iPhone 15/ {gsub(/^[[:space:]]+/, "", $1); print $1; exit}')"
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          import re
+          import subprocess
+          import sys
 
-          if [ -z "${SIM_NAME}" ]; then
-            SIM_NAME="$(xcrun simctl list devices available \
-              | awk -F '[()]' '/iPhone/ {gsub(/^[[:space:]]+/, "", $1); print $1; exit}')"
-          fi
+          preferred_names = ["iPhone 15 Pro", "iPhone 15", "iPhone SE (3rd generation)"]
+          devices = json.loads(
+              subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"], text=True)
+          )["devices"]
 
-          if [ -z "${SIM_NAME}" ]; then
-            echo "No available iPhone simulator found."
-            exit 1
-          fi
+          best = None
+          best_key = None
 
-          echo "sim_name=${SIM_NAME}" >> "$GITHUB_OUTPUT"
-          echo "Using simulator: ${SIM_NAME}"
+          for runtime, runtime_devices in devices.items():
+              match = re.search(r"iOS-(\d+)-(\d+)", runtime)
+              if not match:
+                  continue
+              version = (int(match.group(1)), int(match.group(2)))
+              for device in runtime_devices:
+                  if not device.get("isAvailable"):
+                      continue
+                  name = device.get("name", "")
+                  if name not in preferred_names:
+                      continue
+                  preference_rank = preferred_names.index(name)
+                  candidate_key = (version, -preference_rank)
+                  if best_key is None or candidate_key > best_key:
+                      best_key = candidate_key
+                      best = {
+                          "name": name,
+                          "udid": device["udid"],
+                          "runtime": runtime,
+                      }
+
+          if best is None:
+              sys.stderr.write("No supported iPhone simulator runtime found.\n")
+              sys.exit(1)
+
+          print(f"sim_name={best['name']}")
+          print(f"sim_udid={best['udid']}")
+          print(f"sim_runtime={best['runtime']}")
+          PY
+          cat "$GITHUB_OUTPUT"
 
       - name: Build app
         run: |
           set -euo pipefail
-          xcodebuild \
-            -project "arrival uk.xcodeproj" \
-            -scheme "arrival uk" \
-            -destination "platform=iOS Simulator,name=${{ steps.pick_sim.outputs.sim_name }}" \
-            -clonedSourcePackagesDirPath "$HOME/Library/Caches/arrivaluk-source-packages" \
-            -disableAutomaticPackageResolution \
-            CODE_SIGNING_ALLOWED=NO \
+              xcodebuild \
+                -project "arrival uk.xcodeproj" \
+                -scheme "arrival uk" \
+                -destination "platform=iOS Simulator,id=${{ steps.pick_sim.outputs.sim_udid }}" \
+                -clonedSourcePackagesDirPath "$HOME/Library/Caches/arrivaluk-source-packages" \
+                -disableAutomaticPackageResolution \
+                CODE_SIGNING_ALLOWED=NO \
             build | tee /tmp/arrivaluk-build.log
           exit ${PIPESTATUS[0]}
 
       - name: Run XCTest suite
         run: |
           set -euo pipefail
-          xcodebuild \
-            -project "arrival uk.xcodeproj" \
-            -scheme "arrival uk" \
-            -destination "platform=iOS Simulator,name=${{ steps.pick_sim.outputs.sim_name }}" \
-            -parallel-testing-enabled NO \
-            -maximum-concurrent-test-simulator-destinations 1 \
-            -maximum-parallel-testing-workers 1 \
+              xcodebuild \
+                -project "arrival uk.xcodeproj" \
+                -scheme "arrival uk" \
+                -destination "platform=iOS Simulator,id=${{ steps.pick_sim.outputs.sim_udid }}" \
+                -parallel-testing-enabled NO \
+                -maximum-concurrent-test-simulator-destinations 1 \
+                -maximum-parallel-testing-workers 1 \
             -resultBundlePath /tmp/arrivaluk-tests.xcresult \
             -enableCodeCoverage YES \
             -clonedSourcePackagesDirPath "$HOME/Library/Caches/arrivaluk-source-packages" \
@@ -272,13 +301,13 @@ jobs:
       - name: Static analyze
         run: |
           set -euo pipefail
-          xcodebuild \
-            -project "arrival uk.xcodeproj" \
-            -scheme "arrival uk" \
-            -destination "platform=iOS Simulator,name=${{ steps.pick_sim.outputs.sim_name }}" \
-            -clonedSourcePackagesDirPath "$HOME/Library/Caches/arrivaluk-source-packages" \
-            -disableAutomaticPackageResolution \
-            CODE_SIGNING_ALLOWED=NO \
+              xcodebuild \
+                -project "arrival uk.xcodeproj" \
+                -scheme "arrival uk" \
+                -destination "platform=iOS Simulator,id=${{ steps.pick_sim.outputs.sim_udid }}" \
+                -clonedSourcePackagesDirPath "$HOME/Library/Caches/arrivaluk-source-packages" \
+                -disableAutomaticPackageResolution \
+                CODE_SIGNING_ALLOWED=NO \
             analyze | tee /tmp/arrivaluk-analyze.log
           exit ${PIPESTATUS[0]}
 

@@ -14,13 +14,15 @@ nonisolated enum MarketplacePaymentError: Hashable, LocalizedError {
     case unverifiedReceipt(String)
     case backendConfirmationFailed(String)
     case paymentFailed(String)
+    case entitlementPersistenceFailed(String)
 
     var errorDescription: String? {
         switch self {
         case .unavailable(let reason),
              .unverifiedReceipt(let reason),
              .backendConfirmationFailed(let reason),
-             .paymentFailed(let reason):
+             .paymentFailed(let reason),
+             .entitlementPersistenceFailed(let reason):
             return reason
         }
     }
@@ -48,6 +50,19 @@ nonisolated struct MarketplaceAuthorizedPayment: Sendable {
     let transactionReference: String
     let paymentPayload: String
     let finish: (@Sendable () async -> Void)?
+    let finalizeAuthorization: (@MainActor @Sendable (MarketplacePaymentAuthorizationDisposition) -> Void)?
+
+    init(
+        transactionReference: String,
+        paymentPayload: String,
+        finish: (@Sendable () async -> Void)? = nil,
+        finalizeAuthorization: (@MainActor @Sendable (MarketplacePaymentAuthorizationDisposition) -> Void)? = nil
+    ) {
+        self.transactionReference = transactionReference
+        self.paymentPayload = paymentPayload
+        self.finish = finish
+        self.finalizeAuthorization = finalizeAuthorization
+    }
 }
 
 nonisolated enum MarketplacePaymentAuthorizationResult: Sendable {
@@ -59,16 +74,36 @@ nonisolated enum MarketplacePaymentAuthorizationResult: Sendable {
     case failed(String)
 }
 
+nonisolated enum MarketplacePaymentAuthorizationDisposition: Sendable {
+    case success
+    case failure(String)
+}
+
 nonisolated struct MarketplaceEntitlementRecord: Codable, Hashable, Sendable {
     let providerID: String
     let receipt: String
     let grantedAtMillis: Int64
 }
 
+nonisolated struct MarketplaceApplePayRequestContext: Equatable, Sendable {
+    let countryCode: String
+    let currencyCode: String
+
+    static func forDescriptor(_ descriptor: MarketplaceProviderDescriptor) -> MarketplaceApplePayRequestContext {
+        // Apple Pay currently prices marketplace add-ons in GBP only. Keep the request
+        // contract aligned with `priceGBP` until multi-currency pricing is introduced.
+        let _ = descriptor
+        return MarketplaceApplePayRequestContext(
+            countryCode: "GB",
+            currencyCode: "GBP"
+        )
+    }
+}
+
 @MainActor
 protocol MarketplaceEntitlementStoring: Sendable {
     func entitlement(for providerID: String) -> MarketplaceEntitlementRecord?
-    func save(_ entitlement: MarketplaceEntitlementRecord)
+    func save(_ entitlement: MarketplaceEntitlementRecord) throws
 }
 
 @MainActor
@@ -102,10 +137,14 @@ private struct MarketplaceEntitlementKeychainStore: MarketplaceEntitlementStorin
         return loadAll()[normalizedProviderID]
     }
 
-    func save(_ entitlement: MarketplaceEntitlementRecord) {
+    func save(_ entitlement: MarketplaceEntitlementRecord) throws {
         var records = loadAll()
         records[entitlement.providerID] = entitlement
-        guard let data = try? JSONEncoder().encode(records) else { return }
+        guard let data = try? JSONEncoder().encode(records) else {
+            throw MarketplacePaymentError.entitlementPersistenceFailed(
+                "Marketplace entitlement could not be encoded for secure storage."
+            )
+        }
         do {
             try KeychainManager.saveThrowing(
                 data: data,
@@ -114,6 +153,9 @@ private struct MarketplaceEntitlementKeychainStore: MarketplaceEntitlementStorin
             )
         } catch {
             CrashReporter.record(error: error, context: "marketplace_entitlement_store")
+            throw MarketplacePaymentError.entitlementPersistenceFailed(
+                "Marketplace entitlement could not be persisted securely."
+            )
         }
     }
 
@@ -182,7 +224,8 @@ private struct MarketplacePaymentConfirmationService: MarketplacePaymentConfirmi
 @MainActor
 private final class MarketplaceApplePaySessionAuthorizer: NSObject, PKPaymentAuthorizationControllerDelegate {
     private var continuation: CheckedContinuation<MarketplacePaymentAuthorizationResult, Never>?
-    private var pendingResult: MarketplacePaymentAuthorizationResult?
+    private var authorizationCompletion: ((PKPaymentAuthorizationResult) -> Void)?
+    private var hasResolvedAuthorization = false
 
     func authorizePayment(
         for descriptor: MarketplaceProviderDescriptor,
@@ -196,9 +239,10 @@ private final class MarketplaceApplePaySessionAuthorizer: NSObject, PKPaymentAut
         }
 
         let request = PKPaymentRequest()
+        let paymentContext = MarketplaceApplePayRequestContext.forDescriptor(descriptor)
         request.merchantIdentifier = merchantID
-        request.countryCode = RegionRuntime.activeConfiguration.currencyCode == "USD" ? "US" : "GB"
-        request.currencyCode = RegionRuntime.activeConfiguration.currencyCode
+        request.countryCode = paymentContext.countryCode
+        request.currencyCode = paymentContext.currencyCode
         request.supportedNetworks = [.visa, .masterCard, .amex, .maestro]
         request.merchantCapabilities = [.threeDSecure]
         request.paymentSummaryItems = [
@@ -213,6 +257,7 @@ private final class MarketplaceApplePaySessionAuthorizer: NSObject, PKPaymentAut
         }
 
         return await withCheckedContinuation { continuation in
+            self.hasResolvedAuthorization = false
             self.continuation = continuation
         }
     }
@@ -225,23 +270,48 @@ private final class MarketplaceApplePaySessionAuthorizer: NSObject, PKPaymentAut
         let paymentData = payment.token.paymentData
         let digest = SHA256.hash(data: paymentData)
         let transactionReference = Data(digest).base64EncodedString()
-        pendingResult = .authorized(
-            MarketplaceAuthorizedPayment(
-                transactionReference: "applepay-\(transactionReference)",
-                paymentPayload: paymentData.base64EncodedString(),
-                finish: nil
+        authorizationCompletion = completion
+        hasResolvedAuthorization = true
+        continuation?.resume(
+            returning: .authorized(
+                MarketplaceAuthorizedPayment(
+                    transactionReference: "applepay-\(transactionReference)",
+                    paymentPayload: paymentData.base64EncodedString(),
+                    finish: nil,
+                    finalizeAuthorization: { [weak self] disposition in
+                        self?.completeAuthorization(disposition)
+                    }
+                )
             )
         )
-        completion(PKPaymentAuthorizationResult(status: .success, errors: nil))
+        continuation = nil
     }
 
     func paymentAuthorizationControllerDidFinish(_ controller: PKPaymentAuthorizationController) {
-        let result = pendingResult ?? .cancelled
-        let continuation = self.continuation
-        self.continuation = nil
-        self.pendingResult = nil
+        if !hasResolvedAuthorization {
+            continuation?.resume(returning: .cancelled)
+            continuation = nil
+        }
+        authorizationCompletion = nil
+        hasResolvedAuthorization = false
         controller.dismiss(completion: nil)
-        continuation?.resume(returning: result)
+    }
+
+    private func completeAuthorization(_ disposition: MarketplacePaymentAuthorizationDisposition) {
+        guard let authorizationCompletion else { return }
+        self.authorizationCompletion = nil
+
+        switch disposition {
+        case .success:
+            authorizationCompletion(PKPaymentAuthorizationResult(status: .success, errors: nil))
+        case .failure(let message):
+            let error = NSError(
+                domain: "MarketplaceApplePayAuthorization",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: message]
+            )
+            authorizationCompletion(PKPaymentAuthorizationResult(status: .failure, errors: [error]))
+        }
     }
 }
 
@@ -378,13 +448,17 @@ final class MarketplacePaymentCoordinator {
         for productID in restoredProductIDs {
             let normalizedProviderID = productID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             guard entitlementStore.entitlement(for: normalizedProviderID) == nil else { continue }
-            entitlementStore.save(
-                MarketplaceEntitlementRecord(
-                    providerID: normalizedProviderID,
-                    receipt: "restored-\(productID)",
-                    grantedAtMillis: Int64(nowProvider().timeIntervalSince1970 * 1000)
+            do {
+                try entitlementStore.save(
+                    MarketplaceEntitlementRecord(
+                        providerID: normalizedProviderID,
+                        receipt: "restored-\(productID)",
+                        grantedAtMillis: Int64(nowProvider().timeIntervalSince1970 * 1000)
+                    )
                 )
-            )
+            } catch {
+                CrashReporter.record(error: error, context: "marketplace_restore_entitlement")
+            }
         }
     }
 
@@ -399,7 +473,7 @@ final class MarketplacePaymentCoordinator {
         }
 
         let providerID = descriptor.normalizedProviderID
-        if let existingEntitlement = entitlementStore.entitlement(for: providerID) {
+        if let existingEntitlement = existingEntitlement(for: descriptor) {
             emit(.succeeded(receipt: existingEntitlement.receipt))
             return .succeeded(existingEntitlement.receipt)
         }
@@ -425,9 +499,18 @@ final class MarketplacePaymentCoordinator {
                     receipt: restoredReceipt,
                     grantedAtMillis: Int64(nowProvider().timeIntervalSince1970 * 1000)
                 )
-                entitlementStore.save(entitlement)
-                emit(.succeeded(receipt: restoredReceipt))
-                return .succeeded(restoredReceipt)
+                do {
+                    try entitlementStore.save(entitlement)
+                    emit(.succeeded(receipt: restoredReceipt))
+                    return .succeeded(restoredReceipt)
+                } catch let error as MarketplacePaymentError {
+                    emit(.failed(error))
+                    return .failed(error)
+                } catch {
+                    let wrapped = MarketplacePaymentError.entitlementPersistenceFailed(error.localizedDescription)
+                    emit(.failed(wrapped))
+                    return .failed(wrapped)
+                }
             }
 
             let authorization = await storeKitAuthorizer.authorizePayment(for: descriptor)
@@ -453,17 +536,20 @@ final class MarketplacePaymentCoordinator {
                     userID: userID,
                     authorization: authorizedPayment
                 )
-                entitlementStore.save(entitlement)
+                try entitlementStore.save(entitlement)
+                authorizedPayment.finalizeAuthorization?(.success)
                 if let finish = authorizedPayment.finish {
                     await finish()
                 }
                 emit(.succeeded(receipt: entitlement.receipt))
                 return .succeeded(entitlement.receipt)
             } catch let error as MarketplacePaymentError {
+                authorizedPayment.finalizeAuthorization?(.failure(error.localizedDescription))
                 emit(.failed(error))
                 return .failed(error)
             } catch {
                 let wrapped = MarketplacePaymentError.backendConfirmationFailed(error.localizedDescription)
+                authorizedPayment.finalizeAuthorization?(.failure(wrapped.localizedDescription))
                 emit(.failed(wrapped))
                 return .failed(wrapped)
             }
@@ -510,5 +596,20 @@ final class MarketplacePaymentCoordinator {
         case .cancelled:
             TelemetryStore.shared.record(name: "marketplace_payment_cancelled", level: .info)
         }
+    }
+
+    private func existingEntitlement(for descriptor: MarketplaceProviderDescriptor) -> MarketplaceEntitlementRecord? {
+        if let direct = entitlementStore.entitlement(for: descriptor.normalizedProviderID) {
+            return direct
+        }
+
+        let normalizedProductID = descriptor.paymentProductID?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard let normalizedProductID, !normalizedProductID.isEmpty else {
+            return nil
+        }
+
+        return entitlementStore.entitlement(for: normalizedProductID)
     }
 }

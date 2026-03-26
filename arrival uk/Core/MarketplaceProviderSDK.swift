@@ -110,6 +110,18 @@ struct OnboardingResult: Hashable, Sendable {
     let completedCategoryID: String?
 }
 
+enum MarketplaceLaunchURLResolver {
+    static func resolve(primary: URL?, fallback: URL?) -> URL? {
+        if let primary, ExternalURLPolicy.isAllowed(primary) {
+            return primary
+        }
+        if let fallback, ExternalURLPolicy.isAllowed(fallback) {
+            return fallback
+        }
+        return nil
+    }
+}
+
 struct MarketplaceOnboardingContext: Sendable {
     let providerID: String
     let identityToken: String

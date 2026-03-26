@@ -161,15 +161,17 @@ function parseBatchRequest(value: unknown): TaskSyncBatchRequest | null {
 
   const clientId = safeString(value.clientId);
   const deviceId = safeString(value.deviceId);
-  const operations = Array.isArray(value.operations)
-    ? value.operations
-      .map(parseOperationRequest)
-      .filter((operation): operation is TaskSyncOperationRequest => operation !== null)
-    : [];
-
-  if (!clientId || !deviceId || operations.length === 0) {
+  const rawOperations = Array.isArray(value.operations) ? value.operations : [];
+  const parsedOperations = rawOperations.map(parseOperationRequest);
+  if (!clientId || !deviceId || rawOperations.length === 0) {
     return null;
   }
+
+  if (parsedOperations.some((operation) => operation === null)) {
+    return null;
+  }
+
+  const operations = parsedOperations as TaskSyncOperationRequest[];
 
   return {
     clientId,
@@ -421,9 +423,8 @@ export const taskSync = functions.https.onRequest(async (request, response) => {
       );
       results.push(outcome.result);
 
-      if (outcome.statusCode !== 200) {
+      if (statusCode === 200 && outcome.statusCode !== 200) {
         statusCode = outcome.statusCode;
-        break;
       }
     }
   } catch (error) {

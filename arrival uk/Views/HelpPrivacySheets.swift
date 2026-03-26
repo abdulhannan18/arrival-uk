@@ -124,7 +124,11 @@ struct HelpSheet: View {
     var onClose: (() -> Void)? = nil
 
     private var crashTestEnabled: Bool {
+        #if DEBUG
         ProcessInfo.processInfo.environment["ARRIVAL_CRASH_TEST"] == "1"
+        #else
+        false
+        #endif
     }
 
     @State private var showCopiedDiagnostics = false
@@ -350,6 +354,7 @@ struct HelpSheet: View {
     }
 
     private func triggerCrashTest() {
+        #if DEBUG
         CrashReporter.log("intentional_crash_test_requested", level: .critical)
 
         #if canImport(FirebaseCrashlytics)
@@ -359,6 +364,9 @@ struct HelpSheet: View {
         #endif
 
         fatalError("Intentional crash test (ARRIVAL_CRASH_TEST=1)")
+        #else
+        CrashReporter.log("intentional_crash_test_blocked_in_release", level: .warning)
+        #endif
     }
 
     private func copyDiagnosticsToClipboard() {

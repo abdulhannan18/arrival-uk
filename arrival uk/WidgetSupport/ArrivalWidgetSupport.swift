@@ -3,6 +3,63 @@ import Foundation
 import WidgetKit
 #endif
 
+enum ArrivalWidgetRoute: Equatable {
+    struct TaskTarget: Equatable {
+        let categoryID: String
+        let taskID: String
+
+        var isComplete: Bool {
+            !categoryID.isEmpty && !taskID.isEmpty
+        }
+    }
+
+    struct WalletTarget: Equatable {
+        let shouldUnlock: Bool
+        let documentType: SecureDocType?
+    }
+
+    case task(TaskTarget)
+    case wallet(WalletTarget)
+    case quickTask
+    case discountQR
+
+    init?(url: URL) {
+        guard url.scheme?.lowercased() == ArrivalWidgetSupport.deepLinkScheme,
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+
+        let host = components.host?.lowercased() ?? ""
+        switch host {
+        case "task":
+            self = .task(
+                TaskTarget(
+                    categoryID: components.queryValue(named: "categoryID") ?? "",
+                    taskID: components.queryValue(named: "taskID") ?? ""
+                )
+            )
+        case "wallet":
+            let unlockValue = components.queryValue(named: "unlock")?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            let shouldUnlock = unlockValue.map { ["1", "true", "yes", "y"].contains($0) } ?? true
+            let documentType = SecureDocType.widgetRouteValue(components.queryValue(named: "document"))
+            self = .wallet(
+                WalletTarget(
+                    shouldUnlock: shouldUnlock,
+                    documentType: documentType
+                )
+            )
+        case ArrivalWidgetSupport.quickTaskHost:
+            self = .quickTask
+        case ArrivalWidgetSupport.discountQRHost:
+            self = .discountQR
+        default:
+            return nil
+        }
+    }
+}
+
 enum ArrivalWidgetSupport {
     static let kind = "ArrivalTodayWidget"
     static let appGroupID = "group.com.arrivaluk.shared"
@@ -233,6 +290,39 @@ enum ArrivalWidgetSupport {
             return 3
         case .completed:
             return 4
+        }
+    }
+}
+
+private extension URLComponents {
+    func queryValue(named name: String) -> String? {
+        queryItems?.first(where: { $0.name == name })?.value
+    }
+}
+
+private extension SecureDocType {
+    static func widgetRouteValue(_ rawValue: String?) -> SecureDocType? {
+        guard let rawValue else { return nil }
+        let normalized = rawValue
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "-", with: "")
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: " ", with: "")
+
+        switch normalized {
+        case "passport":
+            return .passport
+        case "studentvisa", "visa", "brp":
+            return .studentVisa
+        case "casletter", "cas":
+            return .casLetter
+        case "tenancyagreement", "tenancy":
+            return .tenancyAgreement
+        case "nationalid", "ssn", "sin", "tfn":
+            return .nationalID
+        default:
+            return SecureDocType(rawValue: rawValue)
         }
     }
 }

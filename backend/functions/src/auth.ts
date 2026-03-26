@@ -1,9 +1,10 @@
 import * as admin from "firebase-admin";
 import * as functions from "firebase-functions";
-import { createHmac, randomBytes } from "crypto";
+import { randomBytes } from "crypto";
 import { assertCallableAppCheck } from "./utils/appCheck";
 import { Collections } from "./constants";
 import { enforceRateLimit } from "./utils/rateLimit";
+import { pseudonymizeLogIdentifier } from "./logPrivacy";
 
 if (admin.apps.length === 0) {
   admin.initializeApp();
@@ -26,8 +27,6 @@ const TRACK_LOGIN_RATE_LIMIT_MAX = 60;
 const TRACK_LOGIN_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 const VERIFY_USER_RATE_LIMIT_MAX = 120;
 const VERIFY_USER_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
-const LOG_PSEUDONYMIZATION_KEY = "LOG_PSEUDONYMIZATION_KEY";
-
 function generateReferralCode(): string {
   // 12 hex chars = 48 bits of entropy (~281 trillion combinations).
   return randomBytes(6).toString("hex").toUpperCase();
@@ -124,22 +123,6 @@ function sanitizeAnalyticsProperties(value: unknown): Record<string, unknown> {
   }
 
   return sanitized;
-}
-
-function logPseudonymizationKey(): string {
-  return (
-    process.env.LOG_PSEUDONYMIZATION_KEY ||
-    functions.config()?.logging?.pseudonymization_key ||
-    LOG_PSEUDONYMIZATION_KEY
-  );
-}
-
-function pseudonymizeLogIdentifier(prefix: string, value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const normalized = value.trim();
-  if (!normalized) return undefined;
-  const digest = createHmac("sha256", logPseudonymizationKey()).update(normalized).digest("hex");
-  return `${prefix}:${digest.slice(0, 12)}`;
 }
 
 function sanitizedFailureKinds(failures: string[]): string[] {

@@ -23,3 +23,19 @@ test("pseudonymizeLogIdentifier does not contain raw storage identifiers", () =>
     }
   }
 });
+
+test("pseudonymizeLogIdentifier requires a configured pseudonymization key", () => {
+  const previous = process.env.LOG_PSEUDONYMIZATION_KEY;
+  delete process.env.LOG_PSEUDONYMIZATION_KEY;
+
+  try {
+    const userRef = __private__.pseudonymizeLogIdentifier("uid", "user-123");
+    assert.equal(userRef, undefined);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.LOG_PSEUDONYMIZATION_KEY;
+    } else {
+      process.env.LOG_PSEUDONYMIZATION_KEY = previous;
+    }
+  }
+});

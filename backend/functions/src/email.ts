@@ -6,6 +6,7 @@ import { isPrivilegedCaller } from "./utils/privileged";
 import { enforceRateLimit } from "./utils/rateLimit";
 import { assertCallableAppCheck } from "./utils/appCheck";
 import { Collections } from "./constants";
+import { pseudonymizeLogIdentifier } from "./logPrivacy";
 
 if (admin.apps.length === 0) {
   admin.initializeApp();
@@ -18,9 +19,9 @@ const MAX_TEMPLATE_VARIABLES = 20;
 const MAX_TEMPLATE_VARIABLE_KEY_LENGTH = 64;
 const MAX_TEMPLATE_VARIABLE_VALUE_LENGTH = 500;
 const MAX_UNSUBSCRIBE_LINK_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+const MAX_DIGEST_RESERVATION_AGE_MS = 6 * 60 * 60 * 1000;
 const SENDGRID_API_KEY_SECRET = "SENDGRID_API_KEY";
 const UNSUBSCRIBE_HMAC_SECRET = "UNSUBSCRIBE_HMAC_SECRET";
-const LOG_PSEUDONYMIZATION_KEY = "LOG_PSEUDONYMIZATION_KEY";
 const ALLOWED_CUSTOM_EMAIL_TEMPLATES = new Set([
   "support_followup",
   "broadcast_update",
@@ -140,24 +141,6 @@ function unsubscribeBaseURL(): string {
   ) as string | undefined;
 
   return sanitizeHTTPSURL(configured ?? fallback, fallback);
-}
-
-function logPseudonymizationKey(): string | null {
-  const configured = (
-    process.env.LOG_PSEUDONYMIZATION_KEY ||
-    functions.config()?.logging?.pseudonymization_key
-  ) as string | undefined;
-  const normalized = configured?.trim() ?? "";
-  return normalized.length > 0 ? normalized : null;
-}
-
-function pseudonymizeLogIdentifier(prefix: string, value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const normalized = value.trim();
-  const key = logPseudonymizationKey();
-  if (!normalized || !key) return undefined;
-  const digest = createHmac("sha256", key).update(normalized).digest("hex");
-  return `${prefix}:${digest.slice(0, 12)}`;
 }
 
 function buildEmailTransportSkipLogContext(_payload: MailPayload): Record<string, never> {
@@ -316,8 +299,29 @@ function weeklyDigestIdempotencyKey(userId: string, windowKey: string): string {
     .digest("hex");
 }
 
-function digestReservationAction(existingStatus: DigestSendStatus | null | undefined): "reserve" | "skip" {
+function timestampToMillis(value: unknown): number | null {
+  if (value instanceof admin.firestore.Timestamp) {
+    return value.toMillis();
+  }
+  if (value instanceof Date) {
+    return value.getTime();
+  }
+  return null;
+}
+
+function digestReservationAction(
+  existingStatus: DigestSendStatus | null | undefined,
+  updatedAtMs?: number | null,
+  nowMs = Date.now()
+): "reserve" | "skip" {
   if (!existingStatus || existingStatus === "failed") {
+    return "reserve";
+  }
+  if (
+    existingStatus === "reserved"
+    && typeof updatedAtMs === "number"
+    && nowMs - updatedAtMs >= MAX_DIGEST_RESERVATION_AGE_MS
+  ) {
     return "reserve";
   }
   return "skip";
@@ -341,7 +345,8 @@ async function reserveWeeklyDigestSend(
   return db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(reservationRef);
     const existingStatus = safeString(snapshot.data()?.status) as DigestSendStatus | "";
-    const action = digestReservationAction(existingStatus || null);
+    const updatedAtMs = timestampToMillis(snapshot.data()?.updatedAt);
+    const action = digestReservationAction(existingStatus || null, updatedAtMs);
     if (action === "skip") {
       return { shouldSend: false, idempotencyKey };
     }

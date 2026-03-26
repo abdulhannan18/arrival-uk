@@ -576,75 +576,13 @@ struct HeaderView: View {
     let onAddTap: () -> Void
     let onProfileTap: () -> Void
 
-    private var greetingText: String {
-        let hour = Calendar.current.component(.hour, from: currentDate)
-        return HomeLocalization.greeting(for: hour)
-    }
-
-    private var dateBadgeText: String {
-        UKLocaleFormat.mediumDateString(currentDate)
-    }
-
-    private var greetingLine: String {
-        "\(greetingText), \(userFirstName)"
-    }
-
-    private var userFirstName: String {
-        let trimmed = userDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { return HomeLocalization.defaultFirstName }
-        return trimmed.components(separatedBy: .whitespaces).first ?? trimmed
-    }
-
-    private var dateContextLine: String {
-        dateBadgeText
-    }
-
-    private var arrivalStatusPillText: String? {
-        if daysUntilArrival == 0 {
-            return HomeLocalization.arrivingToday
-        }
-        if daysUntilArrival == 1 {
-            return HomeLocalization.arrivingTomorrow
-        }
-        if (2...14).contains(daysUntilArrival) {
-            return HomeLocalization.arrivingInDays(daysUntilArrival)
-        }
-        return nil
-    }
-
-    private var streakPillText: String? {
-        guard streakCount > 0 else { return nil }
-        return HomeLocalization.streakLabel(days: streakCount)
-    }
-
-    private var profileInitials: String {
-        let trimmed = userDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "U" }
-
-        let parts = trimmed
-            .split(whereSeparator: { $0.isWhitespace })
-            .map(String.init)
-            .filter { !$0.isEmpty }
-
-        if parts.count >= 2 {
-            let first = parts.first?.prefix(1) ?? ""
-            let last = parts.last?.prefix(1) ?? ""
-            let combined = "\(first)\(last)".uppercased()
-            return combined.isEmpty ? "U" : combined
-        }
-
-        if let first = trimmed.first {
-            return String(first).uppercased()
-        }
-
-        return "U"
-    }
-
-    private var daysUntilArrival: Int {
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: currentDate)
-        let arrival = calendar.startOfDay(for: arrivalDate)
-        return calendar.dateComponents([.day], from: today, to: arrival).day ?? 0
+    private var presentationState: HomeHeaderPresentationState {
+        HomeHeaderPresentationState(
+            currentDate: currentDate,
+            arrivalDate: arrivalDate,
+            userDisplayName: userDisplayName,
+            streakCount: streakCount
+        )
     }
 
     private var usesAccessibilityLayout: Bool {
@@ -734,14 +672,6 @@ struct HeaderView: View {
         colorScheme == .dark ? Color.black.opacity(0.24) : Color.black.opacity(0.10)
     }
 
-    private var profileAccessibilityLabel: String {
-        let trimmed = userDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            return HomeLocalization.openProfileLabel
-        }
-        return "\(HomeLocalization.openProfileLabel): \(trimmed)"
-    }
-
     @ViewBuilder
     private var identityBlock: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -754,7 +684,7 @@ struct HeaderView: View {
                 .minimumScaleFactor(0.85)
                 .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
 
-            Text(greetingLine)
+            Text(presentationState.greetingLine)
                 .font(ArrivalTypography.figtree(size: 30, weight: .black))
                 .tracking(-1.2)
                 .foregroundStyle(primaryTextColor)
@@ -763,7 +693,7 @@ struct HeaderView: View {
                 .minimumScaleFactor(0.85)
                 .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
 
-            Text(dateContextLine)
+            Text(presentationState.dateContextLine)
                 .font(ArrivalTypography.figtree(size: 11, weight: .medium))
                 .foregroundStyle(secondaryTextColor)
                 .lineLimit(1)
@@ -784,7 +714,7 @@ struct HeaderView: View {
                 .minimumScaleFactor(0.9)
                 .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
 
-            if let streakText = streakPillText {
+            if let streakText = presentationState.streakPillText {
                 HStack(spacing: 6) {
                     Image(systemName: "flame.fill")
                         .font(.system(size: 12, weight: .semibold))
@@ -806,7 +736,7 @@ struct HeaderView: View {
                 .accessibilityLabel(streakText)
             }
 
-            if let pillText = arrivalStatusPillText {
+            if let pillText = presentationState.arrivalStatusPillText {
                 HStack(spacing: 8) {
                     Image(systemName: "airplane.arrival")
                         .font(.system(size: 13, weight: .semibold))
@@ -878,7 +808,7 @@ struct HeaderView: View {
                 Haptics.selectionIfAllowed()
                 onProfileTap()
             } label: {
-                Text(profileInitials)
+                Text(presentationState.profileInitials)
                     .font(ArrivalTypography.figtree(size: 17, weight: .medium))
                     .foregroundStyle(secondaryTextColor)
                     .frame(width: controlSize, height: controlSize)
@@ -893,7 +823,7 @@ struct HeaderView: View {
                     .shadow(color: controlShadowColor.opacity(0.55), radius: 5, x: 0, y: 2)
             }
             .buttonStyle(AppFastButtonStyle())
-            .accessibilityLabel(profileAccessibilityLabel)
+            .accessibilityLabel(presentationState.profileAccessibilityLabel)
         }
     }
 

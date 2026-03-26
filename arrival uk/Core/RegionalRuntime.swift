@@ -251,8 +251,8 @@ struct RegionConfiguration: Codable, Equatable, Sendable {
                 currencyCode: "GBP",
                 dateFormat: "dd MMM yyyy",
                 nationalIDLabel: "National Insurance Number",
-                apiBaseURL: URL(string: "https://api.uk.arrival.com")!,
-                legalBaseURL: URL(string: "https://uk.arrival.com")!,
+                apiBaseURL: requiredStaticURL("https://api.uk.arrival.com"),
+                legalBaseURL: requiredStaticURL("https://uk.arrival.com"),
                 identityRequirements: [.passport, .brp, .universityCAS],
                 survivalTaskBoostKeywords: ["gp", "nhs", "brp", "bank account"],
                 complianceProfile: .gdpr,
@@ -269,8 +269,8 @@ struct RegionConfiguration: Codable, Equatable, Sendable {
                 currencyCode: "USD",
                 dateFormat: "MMM d, yyyy",
                 nationalIDLabel: "Social Security Number",
-                apiBaseURL: URL(string: "https://api.us.arrival.com")!,
-                legalBaseURL: URL(string: "https://us.arrival.com")!,
+                apiBaseURL: requiredStaticURL("https://api.us.arrival.com"),
+                legalBaseURL: requiredStaticURL("https://us.arrival.com"),
                 identityRequirements: [.passport, .ssn, .tenancy],
                 survivalTaskBoostKeywords: ["health insurance", "ssn", "social security", "bank account"],
                 complianceProfile: .ccpaCPRA,
@@ -293,8 +293,8 @@ struct RegionConfiguration: Codable, Equatable, Sendable {
                 currencyCode: "CAD",
                 dateFormat: "yyyy-MM-dd",
                 nationalIDLabel: "Social Insurance Number",
-                apiBaseURL: URL(string: "https://api.ca.arrival.com")!,
-                legalBaseURL: URL(string: "https://ca.arrival.com")!,
+                apiBaseURL: requiredStaticURL("https://api.ca.arrival.com"),
+                legalBaseURL: requiredStaticURL("https://ca.arrival.com"),
                 identityRequirements: [.passport, .sin, .tenancy],
                 survivalTaskBoostKeywords: ["health insurance", "sin", "bank account"],
                 complianceProfile: .gdpr,
@@ -317,8 +317,8 @@ struct RegionConfiguration: Codable, Equatable, Sendable {
                 currencyCode: "AUD",
                 dateFormat: "d MMM yyyy",
                 nationalIDLabel: "Tax File Number",
-                apiBaseURL: URL(string: "https://api.au.arrival.com")!,
-                legalBaseURL: URL(string: "https://au.arrival.com")!,
+                apiBaseURL: requiredStaticURL("https://api.au.arrival.com"),
+                legalBaseURL: requiredStaticURL("https://au.arrival.com"),
                 identityRequirements: [.passport, .tfn, .tenancy],
                 survivalTaskBoostKeywords: ["medicare", "tfn", "health insurance", "bank account"],
                 complianceProfile: .global,
@@ -340,8 +340,8 @@ struct RegionConfiguration: Codable, Equatable, Sendable {
                 currencyCode: "GBP",
                 dateFormat: "dd MMM yyyy",
                 nationalIDLabel: "National ID",
-                apiBaseURL: URL(string: "https://api.global.arrival.com")!,
-                legalBaseURL: URL(string: "https://global.arrival.com")!,
+                apiBaseURL: requiredStaticURL("https://api.global.arrival.com"),
+                legalBaseURL: requiredStaticURL("https://global.arrival.com"),
                 identityRequirements: [.passport],
                 survivalTaskBoostKeywords: [],
                 complianceProfile: .global,
@@ -358,33 +358,40 @@ struct RegionConfiguration: Codable, Equatable, Sendable {
         return value
     }
 
+    private static func requiredStaticURL(_ value: String) -> URL {
+        guard let url = URL(string: value), url.scheme?.lowercased() == "https" else {
+            preconditionFailure("Invalid static HTTPS URL: \(value)")
+        }
+        return url
+    }
+
     private static func fallbackAPIBaseURL(for region: ArrivalRegion) -> URL {
         switch region {
         case .uk:
-            return URL(string: "https://api.uk.arrival.com")!
+            return requiredStaticURL("https://api.uk.arrival.com")
         case .usa:
-            return URL(string: "https://api.us.arrival.com")!
+            return requiredStaticURL("https://api.us.arrival.com")
         case .canada:
-            return URL(string: "https://api.ca.arrival.com")!
+            return requiredStaticURL("https://api.ca.arrival.com")
         case .australia:
-            return URL(string: "https://api.au.arrival.com")!
+            return requiredStaticURL("https://api.au.arrival.com")
         case .global:
-            return URL(string: "https://api.global.arrival.com")!
+            return requiredStaticURL("https://api.global.arrival.com")
         }
     }
 
     private static func fallbackLegalBaseURL(for region: ArrivalRegion) -> URL {
         switch region {
         case .uk:
-            return URL(string: "https://uk.arrival.com")!
+            return requiredStaticURL("https://uk.arrival.com")
         case .usa:
-            return URL(string: "https://us.arrival.com")!
+            return requiredStaticURL("https://us.arrival.com")
         case .canada:
-            return URL(string: "https://ca.arrival.com")!
+            return requiredStaticURL("https://ca.arrival.com")
         case .australia:
-            return URL(string: "https://au.arrival.com")!
+            return requiredStaticURL("https://au.arrival.com")
         case .global:
-            return URL(string: "https://global.arrival.com")!
+            return requiredStaticURL("https://global.arrival.com")
         }
     }
 

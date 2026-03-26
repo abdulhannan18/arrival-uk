@@ -152,6 +152,14 @@ test("digest retry succeeds when previous send failed", () => {
   assert.equal(__private__.digestReservationAction(null), "reserve");
 });
 
+test("stale reserved digest can be retried", () => {
+  const nowMs = Date.parse("2026-03-22T12:00:00.000Z");
+  const staleUpdatedAtMs = nowMs - (7 * 60 * 60 * 1000);
+
+  assert.equal(__private__.digestReservationAction("reserved", staleUpdatedAtMs, nowMs), "reserve");
+  assert.equal(__private__.digestReservationAction("reserved", nowMs - (60 * 60 * 1000), nowMs), "skip");
+});
+
 
 test("log output does not contain raw email or domain", () => {
   const previousKey = process.env.LOG_PSEUDONYMIZATION_KEY;

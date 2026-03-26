@@ -55,32 +55,37 @@ enum ArrivalWidgetShared {
         return components.url
     }
 
-    static func walletDeepLinkURL(shouldUnlock: Bool = true, documentRawValue: String? = nil) -> URL? {
-        var components = URLComponents()
-        components.scheme = deepLinkScheme
-        components.host = "wallet"
+    static func walletDeepLinkURL(shouldUnlock: Bool = true, documentRawValue: String? = nil) -> URL {
         var queryItems = [
             URLQueryItem(name: "unlock", value: shouldUnlock ? "1" : "0")
         ]
         if let documentRawValue {
             queryItems.append(URLQueryItem(name: "document", value: documentRawValue))
         }
-        components.queryItems = queryItems
-        return components.url
+        return requiredDeepLinkURL(host: "wallet", queryItems: queryItems)
     }
 
-    static func quickTaskDeepLinkURL() -> URL? {
-        var components = URLComponents()
-        components.scheme = deepLinkScheme
-        components.host = quickTaskHost
-        return components.url
+    static func quickTaskDeepLinkURL() -> URL {
+        requiredDeepLinkURL(host: quickTaskHost)
     }
 
-    static func discountQRDeepLinkURL() -> URL? {
+    static func discountQRDeepLinkURL() -> URL {
+        requiredDeepLinkURL(host: discountQRHost)
+    }
+
+    private static func requiredDeepLinkURL(
+        host: String,
+        queryItems: [URLQueryItem] = []
+    ) -> URL {
         var components = URLComponents()
         components.scheme = deepLinkScheme
-        components.host = discountQRHost
-        return components.url
+        components.host = host
+        components.queryItems = queryItems.isEmpty ? nil : queryItems
+        guard let url = components.url else {
+            assertionFailure("Internal widget deep link components are invalid.")
+            return URL(fileURLWithPath: "/")
+        }
+        return url
     }
 }
 

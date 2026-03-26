@@ -6,6 +6,7 @@ final class MarketplacePaymentCoordinatorTests: XCTestCase {
     private final class EntitlementStoreState: @unchecked Sendable {
         var records: [String: MarketplaceEntitlementRecord] = [:]
         var saveCount = 0
+        var saveError: MarketplacePaymentError?
     }
 
     private final class StoreKitState: @unchecked Sendable {
@@ -17,6 +18,7 @@ final class MarketplacePaymentCoordinatorTests: XCTestCase {
     private final class ConfirmationState: @unchecked Sendable {
         var callCount = 0
         var eventLog: [String] = []
+        var authorizationFinalizationLog: [String] = []
     }
 
     private final class FinishState: @unchecked Sendable {
@@ -32,7 +34,10 @@ final class MarketplacePaymentCoordinatorTests: XCTestCase {
             state.records[providerID]
         }
 
-        func save(_ entitlement: MarketplaceEntitlementRecord) {
+        func save(_ entitlement: MarketplaceEntitlementRecord) throws {
+            if let saveError = state.saveError {
+                throw saveError
+            }
             state.saveCount += 1
             state.records[entitlement.providerID] = entitlement
         }
@@ -283,6 +288,32 @@ final class MarketplacePaymentCoordinatorTests: XCTestCase {
         XCTAssertEqual(storeState.saveCount, 0)
     }
 
+    func testRestoredEntitlementStoredUnderProductIDBlocksRepurchase() async {
+        let storeKitState = StoreKitState()
+        let confirmationState = ConfirmationState()
+        let harness = makeCoordinator(
+            storeKitState: storeKitState,
+            confirmationState: confirmationState,
+            storeKitResult: .failed("should_not_run"),
+            restoredEntitlements: ["com.arrival.test.provider"]
+        )
+
+        let result = await harness.coordinator.processServicePayment(
+            for: makeDescriptor(
+                providerID: "bank_provider",
+                paymentMode: .storeKit,
+                paymentProductID: "com.arrival.test.provider"
+            ),
+            userID: "user_123"
+        )
+
+        XCTAssertEqual(result, .succeeded("restored-com.arrival.test.provider"))
+        XCTAssertEqual(storeKitState.restoreCalls, 1)
+        XCTAssertEqual(storeKitState.authorizeCalls, 0)
+        XCTAssertEqual(confirmationState.callCount, 0)
+        XCTAssertEqual(harness.storeState.records["com.arrival.test.provider"]?.receipt, "restored-com.arrival.test.provider")
+    }
+
     func testPendingPurchaseDoesNotGrantOrDeny() async {
         let harness = makeCoordinator(
             storeKitResult: .pending
@@ -330,5 +361,97 @@ final class MarketplacePaymentCoordinatorTests: XCTestCase {
         }
         XCTAssertEqual(error, .paymentFailed("processor_down"))
         XCTAssertEqual(harness.coordinator.latestEvent, .failed(.paymentFailed("processor_down")))
+    }
+
+    func testBackendConfirmationFailureFinalizesApplePayAsFailure() async {
+        let confirmationState = ConfirmationState()
+        let authorizedPayment = MarketplaceAuthorizedPayment(
+            transactionReference: "applepay-123",
+            paymentPayload: "payload",
+            finalizeAuthorization: { disposition in
+                switch disposition {
+                case .success:
+                    confirmationState.authorizationFinalizationLog.append("success")
+                case .failure(let reason):
+                    confirmationState.authorizationFinalizationLog.append("failure:\(reason)")
+                }
+            }
+        )
+        let coordinator = MarketplacePaymentCoordinator(
+            applePayAuthorizer: ScriptedApplePayAuthorizer(result: .authorized(authorizedPayment)),
+            storeKitAuthorizer: ScriptedStoreKitAuthorizer(
+                state: StoreKitState(),
+                hasEntitlementResult: false,
+                authorizationResult: .failed("unused"),
+                restoredEntitlementsResult: []
+            ),
+            confirmationService: ScriptedConfirmationService(
+                state: confirmationState,
+                handler: { _, _, _ in
+                    throw TestError.confirmationRejected
+                }
+            ),
+            entitlementStore: ScriptedEntitlementStore(state: EntitlementStoreState()),
+            nowProvider: { Date(timeIntervalSince1970: 1_742_473_600) }
+        )
+
+        let result = await coordinator.processServicePayment(
+            for: makeDescriptor(paymentMode: .applePay),
+            userID: "user_123"
+        )
+
+        guard case .failed(let error) = result else {
+            return XCTFail("Expected backend confirmation failure.")
+        }
+        XCTAssertEqual(error, .backendConfirmationFailed(TestError.confirmationRejected.localizedDescription))
+        XCTAssertEqual(
+            confirmationState.authorizationFinalizationLog,
+            ["failure:\(TestError.confirmationRejected.localizedDescription)"]
+        )
+    }
+
+    func testApplePayPricingContextUsesGBPContract() {
+        let context = MarketplaceApplePayRequestContext.forDescriptor(
+            makeDescriptor(
+                providerID: "sim_provider",
+                paymentMode: .applePay,
+                paymentProductID: nil,
+                priceGBP: 7.99
+            )
+        )
+
+        XCTAssertEqual(context.countryCode, "GB")
+        XCTAssertEqual(context.currencyCode, "GBP")
+    }
+
+    func testEntitlementPersistenceFailureDoesNotFinishTransaction() async {
+        let storeState = EntitlementStoreState()
+        storeState.saveError = .entitlementPersistenceFailed("keychain_unavailable")
+        let finishState = FinishState()
+        let harness = makeCoordinator(
+            storeState: storeState,
+            storeKitResult: .authorized(
+                MarketplaceAuthorizedPayment(
+                    transactionReference: "storekit-321",
+                    paymentPayload: "321",
+                    finish: {
+                        finishState.didFinish = true
+                    }
+                )
+            )
+        )
+
+        let result = await harness.coordinator.processServicePayment(
+            for: makeDescriptor(),
+            userID: "user_123"
+        )
+
+        guard case .failed(let error) = result else {
+            return XCTFail("Expected entitlement persistence failure.")
+        }
+        XCTAssertEqual(error, .entitlementPersistenceFailed("keychain_unavailable"))
+        XCTAssertFalse(finishState.didFinish)
+        XCTAssertEqual(harness.confirmationState.callCount, 1)
+        XCTAssertEqual(storeState.saveCount, 0)
     }
 }

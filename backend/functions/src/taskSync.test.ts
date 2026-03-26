@@ -108,3 +108,34 @@ test("same version with different payload yields a conflict", () => {
   assert.equal(outcome.result.accepted, false);
   assert.deepEqual(outcome.result.conflictPayload, existing);
 });
+
+test("batch parsing rejects requests containing any invalid operation", () => {
+  const parsed = __private__.parseBatchRequest({
+    clientId: "client_1",
+    deviceId: "device_1",
+    sentAt: "2026-03-19T10:00:00.000Z",
+    operations: [
+      makeOperation(),
+      {
+        clientId: "client_1",
+        deviceId: "device_1",
+        operationId: "",
+        operationType: "upsert_task",
+        entityId: "task_2",
+        entityVersion: 2,
+        payload: {
+          id: "task_2",
+          title: "Invalid",
+          categoryID: "banking",
+          isCompleted: true,
+          phase: 1,
+          version: 2,
+          updatedAt: "2026-03-19T10:00:00.000Z",
+        },
+        timestamp: "2026-03-19T10:00:00.000Z",
+      },
+    ],
+  });
+
+  assert.equal(parsed, null);
+});

@@ -58,4 +58,22 @@ final class Phase14MarketplaceFederationTests: XCTestCase {
         XCTAssertEqual(config.phase14Marketplace.providers.count, 1)
         XCTAssertEqual(config.phase14Marketplace.providers.first?.normalizedProviderID, "monzo_student")
     }
+
+    func testMarketplaceLaunchURLResolverFallsBackWhenPrimaryURLIsBlocked() {
+        let primary = URL(string: "javascript:alert('xss')")!
+        let fallback = URL(string: "https://provider.example.com/start")!
+
+        let resolved = MarketplaceLaunchURLResolver.resolve(primary: primary, fallback: fallback)
+
+        XCTAssertEqual(resolved, fallback)
+    }
+
+    func testMarketplaceLaunchURLResolverRejectsBlockedPrimaryAndFallback() {
+        let primary = URL(string: "javascript:alert('xss')")!
+        let fallback = URL(string: "http://localhost:8080/debug")!
+
+        let resolved = MarketplaceLaunchURLResolver.resolve(primary: primary, fallback: fallback)
+
+        XCTAssertNil(resolved)
+    }
 }
