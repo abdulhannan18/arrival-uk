@@ -28,6 +28,6 @@
     "@firebase/rules-unit-testing": "^4.0.1",
     "@types/node": "^20.19.33",
     "firebase-tools": "^14.27.0",
-    "typescript": "^5.6.3"
+    "typescript": "^6.0.3"
   }
 }
